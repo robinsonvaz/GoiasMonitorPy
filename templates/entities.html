@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Entidades — Monitor Goiás{% endblock %}
+
+{% block content %}
+{% set entity_types = {
+  'orgao': 'Órgão',
+  'autarquia': 'Autarquia',
+  'fundacao': 'Fundação',
+  'empresa_publica': 'Empresa Pública',
+  'sociedade_mista': 'Soc. Economia Mista',
+  'outro': 'Outro'
+} %}
+
+<div class="page animate-slide-in">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Entidades Monitoradas</h1>
+      <p class="page-subtitle">Gerencie os órgãos e entidades a serem monitorados</p>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="openEntityModal()">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Nova Entidade
+    </button>
+  </div>
+
+  {% if error %}
+    <div class="flash flash-error">{{ error }}</div>
+  {% endif %}
+
+  {% if not entities %}
+    <div class="card empty-state">
+      <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/></svg>
+      <p class="text-muted mt-2">Nenhuma entidade cadastrada ainda.</p>
+    </div>
+  {% else %}
+    <div class="card-list">
+      {% for entity in entities %}
+      <div class="card p-4">
+        <div class="flex items-start gap-3">
+          <div class="entity-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <h3 class="font-medium text-sm">{{ entity.name }}</h3>
+              <span class="badge badge-secondary text-xs">{{ entity_types.get(entity.entity_type, entity.entity_type) }}</span>
+              {% if not entity.is_active %}
+                <span class="badge badge-muted text-xs">Inativo</span>
+              {% endif %}
+            </div>
+            {% if entity.description %}
+              <p class="text-xs text-muted mt-0.5">{{ entity.description }}</p>
+            {% endif %}
+            {% if entity.keywords %}
+              <div class="badge-row mt-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                {% for kw in entity.keywords %}
+                  <span class="badge badge-outline text-xs">{{ kw }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </div>
+          <div class="flex items-center gap-1 flex-shrink-0">
+            <!-- Toggle active -->
+            <form method="POST" action="{{ url_for('entities') }}" style="display:inline">
+              <input type="hidden" name="action" value="toggle" />
+              <input type="hidden" name="entity_id" value="{{ entity.id }}" />
+              <input type="hidden" name="is_active" value="{{ 'false' if entity.is_active else 'true' }}" />
+              <button type="submit" class="btn-ghost btn-icon" title="{{ 'Desativar' if entity.is_active else 'Ativar' }}">
+                {% if entity.is_active %}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-success"><path d="M19 9l-7 7-7-7"/></svg>
+                {% else %}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted"><path d="M5 15l7-7 7 7"/></svg>
+                {% endif %}
+              </button>
+            </form>
+            <!-- Edit -->
+            <button class="btn-ghost btn-icon" onclick="openEditModal('{{ entity.id }}', '{{ entity.name | replace("'", "\\'") }}', '{{ entity.entity_type }}', '{{ (entity.description or '') | replace("'", "\\'") }}', '{{ (entity.keywords or []) | join(", ") }}')" title="Editar">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <!-- Delete -->
+            <form method="POST" action="{{ url_for('entities') }}" style="display:inline" onsubmit="return confirm('Remover a entidade \'{{ entity.name }}\'?')">
+              <input type="hidden" name="action" value="delete" />
+              <input type="hidden" name="entity_id" value="{{ entity.id }}" />
+              <button type="submit" class="btn-ghost btn-icon text-destructive" title="Remover">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+<!-- Modal -->
+<div id="entity-modal" class="modal-overlay" style="display:none" onclick="closeEntityModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="modal-title" class="modal-title">Nova Entidade</h2>
+      <button class="btn-ghost btn-icon" onclick="closeEntityModal()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form method="POST" action="{{ url_for('entities') }}" class="modal-form">
+      <input type="hidden" name="action" id="modal-action" value="create" />
+      <input type="hidden" name="entity_id" id="modal-entity-id" value="" />
+      <div class="form-group">
+        <label>Nome</label>
+        <input type="text" name="name" id="modal-name" placeholder="Ex: Secretaria de Saúde de Goiás" required class="input" />
+      </div>
+      <div class="form-group">
+        <label>Tipo</label>
+        <select name="entity_type" id="modal-type" class="input">
+          {% for val, label in entity_types.items() %}
+            <option value="{{ val }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Descrição</label>
+        <textarea name="description" id="modal-description" placeholder="Descrição opcional" class="input textarea" rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Palavras-chave (separadas por vírgula)</label>
+        <input type="text" name="keywords" id="modal-keywords" placeholder="saúde, SES-GO, secretário" class="input" />
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Salvar</button>
+    </form>
+  </div>
+</div>
+
+<script>
+function openEntityModal() {
+  document.getElementById('modal-title').textContent = 'Nova Entidade';
+  document.getElementById('modal-action').value = 'create';
+  document.getElementById('modal-entity-id').value = '';
+  document.getElementById('modal-name').value = '';
+  document.getElementById('modal-type').value = 'orgao';
+  document.getElementById('modal-description').value = '';
+  document.getElementById('modal-keywords').value = '';
+  document.getElementById('entity-modal').style.display = 'flex';
+}
+function openEditModal(id, name, type, description, keywords) {
+  document.getElementById('modal-title').textContent = 'Editar Entidade';
+  document.getElementById('modal-action').value = 'edit';
+  document.getElementById('modal-entity-id').value = id;
+  document.getElementById('modal-name').value = name;
+  document.getElementById('modal-type').value = type;
+  document.getElementById('modal-description').value = description;
+  document.getElementById('modal-keywords').value = keywords;
+  document.getElementById('entity-modal').style.display = 'flex';
+}
+function closeEntityModal(event) {
+  if (!event || event.target === document.getElementById('entity-modal')) {
+    document.getElementById('entity-modal').style.display = 'none';
+  }
+}
+</script>
+{% endblock %}

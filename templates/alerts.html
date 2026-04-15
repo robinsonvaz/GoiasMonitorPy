@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Alertas — Monitor Goiás{% endblock %}
+
+{% block content %}
+<div class="page animate-slide-in">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Alertas</h1>
+      <p class="page-subtitle">
+        {% if unread_count > 0 %}
+          {{ unread_count }} alerta{{ 's' if unread_count > 1 else '' }} não lido{{ 's' if unread_count > 1 else '' }}
+        {% else %}
+          Nenhum alerta pendente
+        {% endif %}
+      </p>
+    </div>
+    {% if unread_count > 0 %}
+      <form method="POST" action="{{ url_for('alerts') }}">
+        <input type="hidden" name="action" value="mark_all_read" />
+        <button type="submit" class="btn btn-secondary btn-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 21 7 17 3"/><line x1="21" y1="7" x2="9" y2="7"/><polyline points="7 21 3 17 7 13"/><line x1="15" y1="17" x2="3" y2="17"/></svg>
+          Marcar todos como lidos
+        </button>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if not alerts %}
+    <div class="card empty-state">
+      <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      <p class="text-muted mt-2">Nenhum alerta registrado.</p>
+    </div>
+  {% else %}
+    <div class="card-list">
+      {% for alert in alerts %}
+      <div class="card p-4 flex items-start gap-3 {{ 'opacity-60' if alert.is_read else '' }}">
+        <div class="alert-icon {{ 'alert-icon-warning' if alert.alert_type == 'warning' else 'alert-icon-danger' if alert.alert_type == 'danger' else 'alert-icon-info' }} flex-shrink-0 mt-0.5">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm {{ 'font-medium' if not alert.is_read else '' }}">{{ alert.title }}</p>
+          {% if alert.message %}
+            <p class="text-xs text-muted mt-0.5">{{ alert.message }}</p>
+          {% endif %}
+          {% if alert.news_items %}
+            <p class="text-xs text-muted mt-0.5">Notícia: {{ alert.news_items.title }}</p>
+          {% endif %}
+          <span class="text-xs text-muted">{{ alert.created_at | datetime_br }}</span>
+        </div>
+        {% if not alert.is_read %}
+          <form method="POST" action="{{ url_for('alerts') }}" class="flex-shrink-0">
+            <input type="hidden" name="action" value="mark_read" />
+            <input type="hidden" name="alert_id" value="{{ alert.id }}" />
+            <button type="submit" class="btn-ghost btn-icon" title="Marcar como lido">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </button>
+          </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

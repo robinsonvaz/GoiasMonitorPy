@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Grafo — Monitor Goiás{% endblock %}
+
+{% block content %}
+{% set class_labels = {
+  'midia_negativa': 'Mídia Negativa',
+  'nomeacao': 'Nomeação',
+  'exoneracao': 'Exoneração',
+  'substituicao': 'Substituição',
+  'troca': 'Troca',
+  'movimentacao': 'Movimentação',
+  'acao_judicial': 'Ação Judicial',
+  'outro': 'Outro'
+} %}
+{% set class_colors = {
+  'midia_negativa': '#ef4444',
+  'nomeacao': '#22c55e',
+  'exoneracao': '#f97316',
+  'substituicao': '#8b5cf6',
+  'troca': '#6366f1',
+  'movimentacao': '#3b82f6',
+  'acao_judicial': '#eab308',
+  'outro': '#6b7280'
+} %}
+
+<div class="page animate-slide-in">
+  <div>
+    <h1 class="page-title">Grafo de Relacionamentos</h1>
+    <p class="page-subtitle">Visualização das conexões entre notícias, entidades e pessoas mencionadas</p>
+  </div>
+
+  <!-- Legend -->
+  <div class="card p-3">
+    <div class="legend-row">
+      <span class="text-xs font-medium text-muted">Legenda:</span>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#0ea5e9;border-radius:2px"></span>
+        <span class="text-xs">Entidade</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot legend-diamond" style="background:#a855f7"></span>
+        <span class="text-xs">Pessoa</span>
+      </div>
+      {% for cls, color in class_colors.items() %}
+      <div class="legend-item">
+        <span class="legend-dot" style="background:{{ color }};border-radius:50%"></span>
+        <span class="text-xs">{{ class_labels.get(cls, cls) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Graph canvas -->
+  <div class="card graph-container" id="graph-container">
+    <svg id="graph-svg" width="100%" height="100%"></svg>
+  </div>
+</div>
+
+<!-- Graph data -->
+<script>
+const NEWS_ITEMS = {{ news_items | tojson }};
+const CLASS_COLORS = {{ class_colors | tojson }};
+</script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+(function(){
+  const container = document.getElementById('graph-container');
+  const svg = d3.select('#graph-svg');
+
+  function buildGraph(data) {
+    const nodes = [];
+    const links = [];
+    const entityMap = {};
+    const personMap = {};
+
+    data.forEach(news => {
+      const newsId = 'news-' + news.id;
+      nodes.push({
+        id: newsId,
+        label: news.title.length > 40 ? news.title.slice(0,40)+'…' : news.title,
+        type: 'news',
+        classification: news.classification,
+        color: CLASS_COLORS[news.classification] || '#6b7280',
+        size: 6
+      });
+
+      if (news.entity_id && news.monitored_entities) {
+        const entId = 'entity-' + news.entity_id;
+        if (!entityMap[news.entity_id]) {
+          entityMap[news.entity_id] = true;
+          nodes.push({ id: entId, label: news.monitored_entities.name, type: 'entity', color: '#0ea5e9', size: 12 });
+        }
+        links.push({ source: newsId, target: entId });
+      }
+
+      if (news.people_mentioned) {
+        news.people_mentioned.forEach(person => {
+          const pId = 'person-' + person;
+          if (!personMap[person]) {
+            personMap[person] = true;
+            nodes.push({ id: pId, label: person, type: 'person', color: '#a855f7', size: 8 });
+          }
+          links.push({ source: newsId, target: pId });
+        });
+      }
+    });
+
+    return { nodes, links };
+  }
+
+  function render() {
+    const width = container.clientWidth || 800;
+    const height = Math.max(container.clientHeight, 450);
+    svg.attr('viewBox', `0 0 ${width} ${height}`);
+
+    svg.selectAll('*').remove();
+
+    const { nodes, links } = buildGraph(NEWS_ITEMS);
+    if (!nodes.length) {
+      svg.append('text').attr('x', width/2).attr('y', height/2)
+        .attr('text-anchor','middle').attr('fill','#6b7280').attr('font-size','14')
+        .text('Nenhum dado para exibir');
+      return;
+    }
+
+    const sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(d => d.id).distance(60))
+      .force('charge', d3.forceManyBody().strength(-120))
+      .force('center', d3.forceCenter(width/2, height/2))
+      .force('collision', d3.forceCollide(d => d.size + 4));
+
+    const g = svg.append('g');
+
+    // Zoom
+    svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform)));
+
+    // Arrow marker
+    svg.append('defs').append('marker')
+      .attr('id','arrow').attr('viewBox','0 -5 10 10').attr('refX',15).attr('refY',0)
+      .attr('markerWidth',6).attr('markerHeight',6).attr('orient','auto')
+      .append('path').attr('d','M0,-5L10,0L0,5').attr('fill','rgba(255,255,255,0.15)');
+
+    const linkEl = g.append('g').attr('class','links')
+      .selectAll('line').data(links).join('line')
+      .attr('stroke','rgba(255,255,255,0.12)').attr('stroke-width',0.8);
+
+    const nodeEl = g.append('g').attr('class','nodes')
+      .selectAll('g').data(nodes).join('g')
+      .attr('cursor','pointer')
+      .call(d3.drag()
+        .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+        .on('drag', (e, d) => { d.fx=e.x; d.fy=e.y; })
+        .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+      );
+
+    // Draw node shapes
+    nodeEl.each(function(d) {
+      const el = d3.select(this);
+      if (d.type === 'entity') {
+        el.append('rect')
+          .attr('x', -d.size/2).attr('y', -d.size/2)
+          .attr('width', d.size).attr('height', d.size)
+          .attr('fill', d.color).attr('stroke','rgba(255,255,255,0.3)').attr('stroke-width',0.5);
+      } else if (d.type === 'person') {
+        const half = d.size/2;
+        el.append('polygon')
+          .attr('points', `0,${-half} ${half},0 0,${half} ${-half},0`)
+          .attr('fill', d.color).attr('stroke','rgba(255,255,255,0.3)').attr('stroke-width',0.5);
+      } else {
+        el.append('circle')
+          .attr('r', d.size/2)
+          .attr('fill', d.color).attr('stroke','rgba(255,255,255,0.3)').attr('stroke-width',0.5);
+      }
+      if (d.type !== 'news') {
+        el.append('text')
+          .attr('dy', d.size/2 + 10).attr('text-anchor','middle')
+          .attr('fill','rgba(255,255,255,0.8)').attr('font-size','9')
+          .text(d.label);
+      }
+    });
+
+    nodeEl.append('title').text(d => d.label);
+
+    sim.on('tick', () => {
+      linkEl
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      nodeEl.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+  }
+
+  render();
+  window.addEventListener('resize', render);
+})();
+</script>
+{% endblock %}

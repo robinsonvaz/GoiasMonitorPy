@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Notícias — Monitor Goiás{% endblock %}
+
+{% block content %}
+{% set class_labels = {
+  'midia_negativa': 'Mídia Negativa',
+  'nomeacao': 'Nomeação',
+  'exoneracao': 'Exoneração',
+  'substituicao': 'Substituição',
+  'troca': 'Troca',
+  'movimentacao': 'Movimentação',
+  'acao_judicial': 'Ação Judicial',
+  'outro': 'Outro'
+} %}
+
+<div class="page animate-slide-in">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Notícias</h1>
+      <p class="page-subtitle">Todas as notícias coletadas sobre entidades monitoradas</p>
+    </div>
+    <button class="btn btn-primary btn-sm" id="btn-collect" onclick="collectNewsPage()">
+      <svg id="icon-collect" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+      <span id="label-collect">Coletar Notícias</span>
+    </button>
+  </div>
+
+  <!-- Filters -->
+  <form method="GET" action="{{ url_for('news') }}" class="filters-row">
+    <div class="search-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" name="search" value="{{ filters.search }}" placeholder="Buscar notícias..." class="input search-input" />
+    </div>
+    <select name="classification" class="input select-input">
+      <option value="all" {% if filters.classification == 'all' %}selected{% endif %}>Todas as classificações</option>
+      {% for val, label in class_labels.items() %}
+        <option value="{{ val }}" {% if filters.classification == val %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select name="sentiment" class="input select-input">
+      <option value="all" {% if filters.sentiment == 'all' %}selected{% endif %}>Todos sentimentos</option>
+      <option value="positivo" {% if filters.sentiment == 'positivo' %}selected{% endif %}>Positivo</option>
+      <option value="negativo" {% if filters.sentiment == 'negativo' %}selected{% endif %}>Negativo</option>
+      <option value="neutro" {% if filters.sentiment == 'neutro' %}selected{% endif %}>Neutro</option>
+    </select>
+    <select name="entity" class="input select-input">
+      <option value="all" {% if filters.entity == 'all' %}selected{% endif %}>Todas Entidades</option>
+      {% for e in entities %}
+        <option value="{{ e.id }}" {% if filters.entity == e.id %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
+    {% if filters.search or filters.classification != 'all' or filters.sentiment != 'all' or filters.entity != 'all' %}
+      <a href="{{ url_for('news') }}" class="btn btn-ghost btn-sm">Limpar</a>
+    {% endif %}
+  </form>
+
+  <!-- Results -->
+  {% if not news_items %}
+    <div class="card empty-state">
+      <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/></svg>
+      <p class="text-muted mt-2">Nenhuma notícia encontrada.</p>
+    </div>
+  {% else %}
+    <div class="card-list">
+      {% for news in news_items %}
+      <div class="card p-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <h3 class="news-title-lg">{{ news.title }}</h3>
+            {% if news.content %}
+              <p class="news-content">{{ news.content }}</p>
+            {% endif %}
+            <div class="badge-row mt-2">
+              {% if news.monitored_entities %}
+                <span class="badge badge-outline">{{ news.monitored_entities.name }}</span>
+              {% endif %}
+              <span class="badge badge-sentiment-{{ news.sentiment }}">{{ news.sentiment }}</span>
+              <span class="badge badge-secondary">{{ class_labels.get(news.classification, news.classification) }}</span>
+              {% if news.source_name %}
+                <span class="text-xs text-muted">{{ news.source_name }}</span>
+              {% endif %}
+            </div>
+            {% if news.people_mentioned %}
+              <div class="badge-row mt-1">
+                <span class="text-xs text-muted">Pessoas:</span>
+                {% for person in news.people_mentioned %}
+                  <span class="badge badge-secondary">{{ person }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <span class="text-xs text-muted mt-1 block">
+              {{ news.collected_at | datetime_br if news.collected_at else '' }}
+            </span>
+          </div>
+          {% if news.source_url %}
+            <a href="{{ news.source_url }}" target="_blank" rel="noopener noreferrer" class="btn-ghost btn-icon flex-shrink-0" title="Abrir fonte">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+
+<script>
+async function collectNewsPage() {
+  const btn = document.getElementById('btn-collect');
+  const label = document.getElementById('label-collect');
+  const icon = document.getElementById('icon-collect');
+  btn.disabled = true;
+  label.textContent = 'Coletando...';
+  icon.classList.add('spin');
+  try {
+    const res = await fetch('/api/collect-news', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+    const data = await res.json();
+    showToast(data.success ? `Coleta concluída: ${data.collected} notícia(s).` : (data.error || 'Erro'), data.success ? 'success' : 'error');
+    if (data.success) setTimeout(() => location.reload(), 1500);
+  } catch(e) { showToast('Erro na coleta', 'error'); }
+  finally { btn.disabled = false; label.textContent = 'Coletar Notícias'; icon.classList.remove('spin'); }
+}
+</script>
+{% endblock %}

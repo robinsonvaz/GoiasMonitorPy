@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monitor Goiás — Entrar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body class="auth-page">
+
+<div class="auth-container">
+  <div class="auth-header">
+    <div class="auth-logo glow-green">
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </div>
+    <h1>Monitor Goiás</h1>
+    <p class="text-muted">Sistema de Monitoramento de Notícias</p>
+  </div>
+
+  <div class="glass-panel auth-panel">
+    {% if error %}
+      <div class="flash flash-error mb-4">{{ error }}</div>
+    {% endif %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ category }} mb-4">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="tab-switch" id="auth-tabs">
+      <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">Entrar</button>
+      <button class="tab-btn" id="tab-register" onclick="switchTab('register')">Cadastrar</button>
+    </div>
+
+    <!-- Login form -->
+    <form method="POST" action="{{ url_for('auth') }}" id="form-login" class="auth-form">
+      <input type="hidden" name="action" value="login" />
+      <div class="form-group">
+        <label for="login-email">E-mail</label>
+        <input type="email" id="login-email" name="email" placeholder="seu@email.com" required class="input" />
+      </div>
+      <div class="form-group">
+        <label for="login-password">Senha</label>
+        <div class="input-password">
+          <input type="password" id="login-password" name="password" placeholder="••••••••" required class="input" />
+          <button type="button" class="btn-ghost btn-icon eye-btn" onclick="togglePassword('login-password', this)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Entrar</button>
+    </form>
+
+    <!-- Register form -->
+    <form method="POST" action="{{ url_for('auth') }}" id="form-register" class="auth-form" style="display:none">
+      <input type="hidden" name="action" value="register" />
+      <div class="form-group">
+        <label for="reg-name">Nome completo</label>
+        <input type="text" id="reg-name" name="full_name" placeholder="Seu nome" required class="input" />
+      </div>
+      <div class="form-group">
+        <label for="reg-email">E-mail</label>
+        <input type="email" id="reg-email" name="email" placeholder="seu@email.com" required class="input" />
+      </div>
+      <div class="form-group">
+        <label for="reg-password">Senha</label>
+        <div class="input-password">
+          <input type="password" id="reg-password" name="password" placeholder="••••••••" required minlength="6" class="input" />
+          <button type="button" class="btn-ghost btn-icon eye-btn" onclick="togglePassword('reg-password', this)">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Cadastrar</button>
+    </form>
+  </div>
+</div>
+
+<script>
+function switchTab(tab) {
+  document.getElementById('form-login').style.display = tab === 'login' ? '' : 'none';
+  document.getElementById('form-register').style.display = tab === 'register' ? '' : 'none';
+  document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+  document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+}
+function togglePassword(inputId, btn) {
+  const input = document.getElementById(inputId);
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+</script>
+</body>
+</html>

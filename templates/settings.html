@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Configurações — Monitor Goiás{% endblock %}
+
+{% block content %}
+{% set entity_types = {
+  'orgao': 'Órgão',
+  'autarquia': 'Autarquia',
+  'fundacao': 'Fundação',
+  'empresa_publica': 'Empresa Pública',
+  'sociedade_mista': 'Soc. Economia Mista',
+  'outro': 'Outro'
+} %}
+
+<div class="page animate-slide-in">
+  <div>
+    <h1 class="page-title">Configurações</h1>
+    <p class="page-subtitle">Gerencie seu perfil e preferências do sistema</p>
+  </div>
+
+  {% if error %}
+    <div class="flash flash-error">{{ error }}</div>
+  {% endif %}
+
+  <!-- Profile card -->
+  <div class="card p-5">
+    <div class="settings-section-header">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <h2 class="settings-section-title">Perfil</h2>
+    </div>
+    <form method="POST" action="{{ url_for('settings') }}" class="settings-form">
+      <div class="form-group">
+        <label>Nome completo</label>
+        <input type="text" name="full_name" value="{{ profile.full_name if profile else user.full_name }}" placeholder="Seu nome" class="input" />
+      </div>
+      <div class="form-group">
+        <label>E-mail</label>
+        <input type="email" value="{{ user.email }}" class="input" disabled />
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Salvar Perfil
+      </button>
+    </form>
+  </div>
+
+  <!-- System stats -->
+  <div class="card p-5">
+    <div class="settings-section-header">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      <h2 class="settings-section-title">Estatísticas do Sistema</h2>
+    </div>
+    <div class="stats-row">
+      <div class="mini-stat">
+        <div class="mini-stat-value">{{ entities|length }}</div>
+        <div class="mini-stat-label">Entidades cadastradas</div>
+      </div>
+      <div class="mini-stat">
+        <div class="mini-stat-value">{{ entities|selectattr('is_active')|list|length }}</div>
+        <div class="mini-stat-label">Entidades ativas</div>
+      </div>
+      <div class="mini-stat">
+        <div class="mini-stat-value">{{ news_count }}</div>
+        <div class="mini-stat-label">Total de notícias</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Entities summary -->
+  <div class="card p-5">
+    <div class="settings-section-header">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/></svg>
+      <h2 class="settings-section-title">Entidades Monitoradas</h2>
+    </div>
+    {% if entities %}
+      <div class="entity-summary-list">
+        {% for entity in entities %}
+          <div class="entity-summary-row">
+            <span class="text-sm">{{ entity.name }}</span>
+            <div class="flex gap-1 items-center">
+              <span class="badge badge-secondary text-xs">{{ entity_types.get(entity.entity_type, entity.entity_type) }}</span>
+              <span class="badge {{ 'badge-success' if entity.is_active else 'badge-muted' }} text-xs">{{ 'Ativo' if entity.is_active else 'Inativo' }}</span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="text-muted text-sm">Nenhuma entidade cadastrada.</p>
+    {% endif %}
+  </div>
+
+  <!-- Security -->
+  <div class="card p-5">
+    <div class="settings-section-header">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <h2 class="settings-section-title">Segurança</h2>
+    </div>
+    <p class="text-sm text-muted mb-3">Autenticado como <strong class="text-foreground">{{ user.email }}</strong></p>
+    <a href="{{ url_for('logout') }}" class="btn btn-secondary btn-sm">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Sair da conta
+    </a>
+  </div>
+</div>
+{% endblock %}
