@@ -1,50 +1,54 @@
 # GoiasMonitorPy
 
-Versão Python/Flask do **GoiasMonitor** — sistema de monitoramento de notícias sobre órgãos e entidades do estado de Goiás.
+Sistema de monitoramento de notícias sobre órgãos, entidades, pessoas e empresas relacionadas ao estado de Goiás.
 
-## Tecnologias
+O projeto foi migrado para FastAPI e hoje inclui:
+- coleta web e social com estratégia híbrida (Google News + web aberta)
+- classificação por IA
+- painel com métricas e filtros
+- grafo de relacionamentos com destaque interativo por nível de conexão
 
-- **Python 3.11** + **Flask**
-- **MySQL local** (persistência 100% local)
-- Agentes de coleta com **Firecrawl** / **ScrapingBee**
-- Classificação por IA via **Lovable AI Gateway** (Gemini 2.5 Flash)
-- Frontend em HTML/CSS com design dark idêntico ao original
+## Stack
 
-## Estrutura
+- Python 3.11
+- FastAPI + Jinja2
+- Pydantic Settings
+- MySQL (persistência local)
+- HTMX (ações assíncronas na UI)
+- D3.js (grafo de relacionamentos)
+- MyPy (tipagem estática)
+- IA via Lovable AI Gateway (Gemini 2.5 Flash)
 
-```
+## Estrutura principal
+
+```text
 GoiasMonitorPy/
-├── app.py                  # Aplicação Flask principal (todas as rotas)
-├── config.py               # Variáveis de configuração
-├── db.py                   # Conexão e helpers para banco MySQL local
+├── app.py
+├── config.py
+├── db.py
+├── requirements.txt
+├── requirements-dev.txt
+├── mypy.ini
+├── start-app.ps1
+├── run.bat
 ├── agents/
-│   ├── news_collector.py   # Agente de coleta de notícias na web
-│   └── social_collector.py # Agente de coleta em redes sociais
+│   ├── news_collector.py
+│   └── social_collector.py
 ├── tools/
-│   ├── firecrawl.py        # Tool: busca via Firecrawl API
-│   ├── scrapingbee.py      # Tool: busca via ScrapingBee API
-│   └── ai_classifier.py    # Tool: classificação AI (Lovable Gateway)
+│   ├── ai_classifier.py
+│   └── google_search.py
+├── scripts/
+│   └── reprocess_mentions.py
 ├── prompts/
-│   ├── news_classifier.txt # Prompt para classificação de notícias web
-│   └── social_classifier.txt # Prompt para classificação de redes sociais
-├── templates/              # Templates Jinja2 (HTML)
-│   ├── base.html           # Layout base com sidebar
-│   ├── auth.html           # Login/Cadastro
-│   ├── dashboard.html      # Dashboard principal
-│   ├── news.html           # Listagem de notícias com filtros
-│   ├── entities.html       # CRUD de entidades monitoradas
-│   ├── alerts.html         # Alertas (marcar como lido)
-│   ├── graph.html          # Grafo D3.js de relacionamentos
-│   └── settings.html       # Configurações e perfil
-├── static/
-│   ├── css/style.css       # Design system dark (replica Tailwind do original)
-│   └── js/app.js           # JavaScript global (sidebar mobile, toasts)
-└── .env                    # Variáveis de ambiente (não versionar)
+│   ├── news_classifier.txt
+│   └── social_classifier.txt
+├── templates/
+└── static/
 ```
 
 ## Configuração
 
-### 1. Editar o `.env`
+Crie/edite o arquivo `.env` na raiz:
 
 ```env
 MYSQL_HOST=127.0.0.1
@@ -52,49 +56,114 @@ MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=root
 MYSQL_DATABASE=goiasmonitor
+
 LOCAL_ADMIN_EMAIL=admin@local
 LOCAL_ADMIN_PASSWORD=admin123
 LOCAL_ADMIN_NAME=Administrador Local
-FLASK_SECRET_KEY=troque-esta-chave
+
+APP_SECRET_KEY=troque-esta-chave
+DEBUG=false
+
 LOVABLE_API_KEY=
+
+# Mantidas por compatibilidade
 FIRECRAWL_API_KEY=
 SCRAPINGBEE_API_KEY=
 ```
 
-### 2. Ativar o ambiente virtual
+Observações:
+- `APP_SECRET_KEY` é o nome preferencial (também aceita `FLASK_SECRET_KEY` por compatibilidade).
+- `LOVABLE_API_KEY` é necessária para classificação e enriquecimento das notícias.
+
+## Execução (Windows)
+
+### Opção 1 (recomendada)
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+./start-app.ps1
 ```
 
-### 3. Executar
+Parâmetros úteis:
 
 ```powershell
-python app.py
+./start-app.ps1 -Port 8001
+./start-app.ps1 -HostAddr 0.0.0.0 -Port 8000
+./start-app.ps1 -NoReload
 ```
 
-Acesse: **http://localhost:5000**
+### Opção 2
+
+```bat
+run.bat
+```
+
+A aplicação sobe em `http://127.0.0.1:8000` por padrão.
+
+## Instalação de dependências
+
+Ambiente de runtime:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Ferramentas de desenvolvimento (inclui mypy):
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
+## Qualidade e tipagem
+
+```powershell
+.\.venv\Scripts\python.exe -m mypy .
+```
+
+Configuração em `mypy.ini` (modo estrito).
 
 ## Funcionalidades
 
-| Página | Descrição |
-|---|---|
-| Dashboard | Estatísticas gerais, últimas notícias, breakdown por classificação |
-| Notícias | Listagem com filtros por classificação, sentimento e entidade |
-| Entidades | CRUD de entidades monitoradas (nome, tipo, keywords) |
-| Alertas | Alertas gerados automaticamente na coleta, marcação como lido |
-| Grafo | Visualização D3.js de relações notícias ↔ entidades ↔ pessoas |
-| Configurações | Perfil do usuário e estatísticas do sistema |
+- Dashboard com métricas gerais e últimas notícias
+- Coleta web e social via botões da UI
+- Notícias com filtros por texto, classificação, sentimento e entidade
+- CRUD de entidades monitoradas
+- Alertas com marcação de leitura
+- Grafo com:
+	- ícones distintos para pessoa, entidade e empresa
+	- lista com filtro textual
+	- seleção com destaque visual
+	- expansão/recuo de vizinhança por passos (`+1` e `-1`)
+- Configurações de perfil
 
-## Coleta de Notícias
+## Estratégia de coleta
 
-Os botões **"Coletar Web"** e **"Coletar Redes Sociais"** no Dashboard disparam as APIs:
+Endpoints:
+- `POST /api/collect-news`
+- `POST /api/collect-news-social`
 
-- `POST /api/collect-news` → agente `news_collector.py`
-- `POST /api/collect-news-social` → agente `social_collector.py`
+Fluxo resumido:
+1. Busca em Google News (RSS e fallbacks)
+2. Expansão para web aberta quando necessário
+3. Classificação de relevância/sentimento/classificação por IA
+4. Enriquecimento de menções (pessoas/organizações/empresas)
+5. Persistência em `news_items`
+6. Geração de alertas para casos negativos
 
-Cada agente:
-1. Busca na web via Firecrawl (com fallback para ScrapingBee)
-2. Classifica cada resultado via AI (Gemini 2.5 Flash)
-3. Insere os relevantes no banco local (MySQL)
-4. Gera alertas automáticos para conteúdo negativo
+## Reprocessamento de menções
+
+Para recalcular o campo `people_mentioned` com as regras atuais em notícias já salvas:
+
+```powershell
+$env:PYTHONPATH='.'
+.\.venv\Scripts\python.exe scripts/reprocess_mentions.py
+```
+
+## Banco de dados
+
+- O schema essencial é garantido automaticamente no startup via `ensure_local_schema()`.
+- Tabelas-chave: `users`, `profiles`, `monitored_entities`, `news_items`, `alerts`.
+
+## Observações de uso
+
+- O dashboard exibe o total real de notícias da base e mantém uma lista recente separada para visualização rápida.
+- Para produção, use segredo forte em `APP_SECRET_KEY` e credenciais de banco apropriadas.

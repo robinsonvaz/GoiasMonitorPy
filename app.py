@@ -174,7 +174,7 @@ async def logout(request: Request) -> RedirectResponse:
 
 @app.get("/", response_class=HTMLResponse, name="dashboard")
 async def dashboard(request: Request, user: UserDep) -> HTMLResponse:
-    news_items: list[dict[str, Any]] = query_all(
+    recent_news_items: list[dict[str, Any]] = query_all(
         """
         SELECT n.*, e.name AS entity_name
         FROM news_items n
@@ -183,9 +183,25 @@ async def dashboard(request: Request, user: UserDep) -> HTMLResponse:
         LIMIT 20
         """
     )
-    for n in news_items:
+    for n in recent_news_items:
         n["people_mentioned"] = parse_json_list(n.get("people_mentioned"))
         n["monitored_entities"] = {"name": n.pop("entity_name")} if n.get("entity_name") else None
+
+    total_news_row = query_one("SELECT COUNT(*) AS total FROM news_items")
+    total_news_count = int(total_news_row["total"]) if total_news_row else 0
+
+    negative_row = query_one(
+        "SELECT COUNT(*) AS total FROM news_items WHERE sentiment = 'negativo'"
+    )
+    negative_count = int(negative_row["total"]) if negative_row else 0
+
+    class_rows: list[dict[str, Any]] = query_all(
+        "SELECT classification, COUNT(*) AS total FROM news_items GROUP BY classification"
+    )
+    class_breakdown: dict[str, int] = {
+        str(row.get("classification") or "outro"): int(row.get("total") or 0)
+        for row in class_rows
+    }
 
     entities: list[dict[str, Any]] = query_all(
         "SELECT * FROM monitored_entities WHERE is_active = 1 ORDER BY name"
@@ -194,16 +210,12 @@ async def dashboard(request: Request, user: UserDep) -> HTMLResponse:
         "SELECT * FROM alerts WHERE user_id = %s AND is_read = 0 ORDER BY created_at DESC",
         (user["id"],),
     )
-    negative_count = sum(1 for n in news_items if n.get("sentiment") == "negativo")
-    class_breakdown: dict[str, int] = {}
-    for n in news_items:
-        c = str(n.get("classification") or "outro")
-        class_breakdown[c] = class_breakdown.get(c, 0) + 1
 
     return _render(
         request,
         "dashboard.html",
-        news_items=news_items,
+        news_items=recent_news_items,
+        total_news_count=total_news_count,
         entities=entities,
         alerts=alerts,
         negative_count=negative_count,

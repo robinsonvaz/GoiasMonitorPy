@@ -23,7 +23,7 @@
   'outro': '#6b7280'
 } %}
 
-<div class="page animate-slide-in">
+<div class="page animate-slide-in graph-page">
   <div>
     <h1 class="page-title">Grafo de Relacionamentos</h1>
     <p class="page-subtitle">Visualização das conexões entre notícias, entidades e pessoas mencionadas</p>
@@ -64,9 +64,32 @@
     </div>
   </div>
 
-  <!-- Graph canvas -->
-  <div class="card graph-container" id="graph-container">
-    <svg id="graph-svg" width="100%" height="100%"></svg>
+  <div class="graph-workbench">
+    <!-- Graph canvas -->
+    <div class="card graph-container" id="graph-container">
+      <div class="graph-selection-controls" id="graph-selection-controls">
+        <span id="graph-selection-depth" class="graph-selection-depth">Sem seleção</span>
+        <div class="graph-selection-buttons">
+          <button type="button" id="graph-depth-decrease" class="graph-depth-btn" disabled>-1</button>
+          <button type="button" id="graph-depth-increase" class="graph-depth-btn" disabled>+1</button>
+        </div>
+      </div>
+      <svg id="graph-svg" width="100%" height="100%"></svg>
+    </div>
+
+    <div class="card graph-directory-card">
+      <div class="graph-directory-header">
+        <div>
+          <h2 class="graph-directory-title">Pessoas e Organizações</h2>
+          <p id="graph-node-count" class="graph-directory-subtitle">Selecione um item para destacar no grafo</p>
+        </div>
+      </div>
+      <div class="graph-filter-wrap">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="graph-node-filter" type="text" class="input search-input graph-filter-input" placeholder="Filtrar pessoa, empresa ou entidade..." />
+      </div>
+      <div id="graph-node-list" class="graph-node-list"></div>
+    </div>
   </div>
 </div>
 
@@ -80,6 +103,30 @@ const CLASS_COLORS = {{ class_colors | tojson }};
 (function(){
   const container = document.getElementById('graph-container');
   const svg = d3.select('#graph-svg');
+  const filterInput = document.getElementById('graph-node-filter');
+  const nodeList = document.getElementById('graph-node-list');
+  const nodeCount = document.getElementById('graph-node-count');
+  const selectionControls = document.getElementById('graph-selection-controls');
+  const selectionDepthLabel = document.getElementById('graph-selection-depth');
+  const decreaseDepthButton = document.getElementById('graph-depth-decrease');
+  const increaseDepthButton = document.getElementById('graph-depth-increase');
+  let activeNodeId = null;
+  let activeDepth = 1;
+  let graphState = null;
+
+  function typeLabel(type) {
+    if (type === 'company') return 'Empresa';
+    if (type === 'entity') return 'Entidade';
+    if (type === 'person') return 'Pessoa';
+    return 'Item';
+  }
+
+  function typeClass(type) {
+    if (type === 'company') return 'company';
+    if (type === 'entity') return 'entity';
+    if (type === 'person') return 'person';
+    return 'item';
+  }
 
   function isCompanyName(name) {
     if (!name) return false;
@@ -219,6 +266,195 @@ const CLASS_COLORS = {{ class_colors | tojson }};
     return { nodes, links };
   }
 
+  function getDirectoryNodes(nodes) {
+    const order = { entity: 0, company: 1, person: 2 };
+    return nodes
+      .filter((node) => node.type !== 'news')
+      .slice()
+      .sort((a, b) => {
+        const typeDiff = (order[a.type] ?? 99) - (order[b.type] ?? 99);
+        if (typeDiff !== 0) return typeDiff;
+        return a.label.localeCompare(b.label, 'pt-BR');
+      });
+  }
+
+  function focusNode(nodeId) {
+    if (!graphState) {
+      activeNodeId = nodeId;
+      activeDepth = 1;
+      return;
+    }
+
+    if (activeNodeId === nodeId) {
+      clearActiveSelection();
+      return;
+    }
+
+    const target = graphState.nodes.find((node) => node.id === nodeId && node.type !== 'news');
+    if (!target) return;
+
+    activeNodeId = nodeId;
+    activeDepth = Math.max(activeDepth, 1);
+    updateGraphHighlight();
+    renderDirectory();
+
+    if (typeof target.x !== 'number' || typeof target.y !== 'number') {
+      return;
+    }
+
+    const scale = 1.6;
+    const transform = d3.zoomIdentity
+      .translate(graphState.width / 2 - target.x * scale, graphState.height / 2 - target.y * scale)
+      .scale(scale);
+
+    svg.transition().duration(350).call(graphState.zoomBehavior.transform, transform);
+  }
+
+  function clearActiveSelection() {
+    activeNodeId = null;
+    activeDepth = 1;
+    updateGraphHighlight();
+    renderDirectory();
+  }
+
+  function adjustSelectionDepth(delta) {
+    if (!graphState || !activeNodeId) return;
+    const nextDepth = Math.max(0, activeDepth + delta);
+    if (nextDepth === activeDepth) return;
+    activeDepth = nextDepth;
+    updateGraphHighlight();
+  }
+
+  function computeDistances(startNodeId) {
+    const distances = new Map();
+    if (!graphState || !startNodeId) return distances;
+
+    const queue = [startNodeId];
+    distances.set(startNodeId, 0);
+
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      const currentDistance = distances.get(currentId) ?? 0;
+      const neighbors = graphState.adjacency.get(currentId) || [];
+      neighbors.forEach((neighborId) => {
+        if (!distances.has(neighborId)) {
+          distances.set(neighborId, currentDistance + 1);
+          queue.push(neighborId);
+        }
+      });
+    }
+
+    return distances;
+  }
+
+  function updateSelectionControls(maxDepth) {
+    if (!activeNodeId) {
+      selectionControls.classList.remove('is-active');
+      selectionDepthLabel.textContent = 'Sem seleção';
+      decreaseDepthButton.disabled = true;
+      increaseDepthButton.disabled = true;
+      return;
+    }
+
+    selectionControls.classList.add('is-active');
+    selectionDepthLabel.textContent = `Alcance: ${activeDepth} passo${activeDepth === 1 ? '' : 's'}`;
+    decreaseDepthButton.disabled = activeDepth <= 0;
+    increaseDepthButton.disabled = activeDepth >= maxDepth;
+  }
+
+  function updateGraphHighlight() {
+    if (!graphState) return;
+
+    const connected = new Set();
+    let distances = new Map();
+    let maxDepth = 0;
+    if (activeNodeId) {
+      distances = computeDistances(activeNodeId);
+      distances.forEach((distance, nodeId) => {
+        if (distance <= activeDepth) {
+          connected.add(nodeId);
+        }
+        if (distance > maxDepth) {
+          maxDepth = distance;
+        }
+      });
+    }
+
+    updateSelectionControls(maxDepth);
+
+    graphState.nodeEl
+      .classed('is-active', (d) => d.id === activeNodeId)
+      .classed('is-connected', (d) => activeNodeId && connected.has(d.id) && d.id !== activeNodeId)
+      .classed('is-dimmed', (d) => activeNodeId && !connected.has(d.id));
+
+    graphState.nodeEl.selectAll('.graph-node-highlight')
+      .attr('opacity', (d) => d.id === activeNodeId ? 0.9 : 0);
+
+    graphState.nodeEl.selectAll('text')
+      .attr('fill', (d) => {
+        if (d.id === activeNodeId) return '#f8fafc';
+        if (activeNodeId && !connected.has(d.id)) return 'rgba(255,255,255,0.36)';
+        return 'rgba(255,255,255,0.8)';
+      });
+
+    graphState.linkEl
+      .attr('stroke', (d) => {
+        if (!activeNodeId) return 'rgba(255,255,255,0.12)';
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        return (connected.has(sourceId) && connected.has(targetId))
+          ? 'rgba(56,189,248,0.55)'
+          : 'rgba(255,255,255,0.06)';
+      })
+      .attr('stroke-width', (d) => {
+        if (!activeNodeId) return 0.8;
+        const sourceId = typeof d.source === 'object' ? d.source.id : d.source;
+        const targetId = typeof d.target === 'object' ? d.target.id : d.target;
+        return (connected.has(sourceId) && connected.has(targetId)) ? 1.5 : 0.6;
+      });
+  }
+
+  function renderDirectory() {
+    if (!graphState) return;
+
+    const filterValue = normalizeMentionLabel(filterInput.value).toLocaleLowerCase('pt-BR');
+    const directoryNodes = getDirectoryNodes(graphState.nodes);
+    const filteredNodes = directoryNodes.filter((node) => {
+      if (!filterValue) return true;
+      return node.label.toLocaleLowerCase('pt-BR').includes(filterValue);
+    });
+
+    if (activeNodeId && !filteredNodes.some((node) => node.id === activeNodeId)) {
+      activeNodeId = null;
+      updateGraphHighlight();
+    }
+
+    nodeCount.textContent = filterValue
+      ? `${filteredNodes.length} de ${directoryNodes.length} itens visíveis`
+      : `${directoryNodes.length} itens disponíveis para destaque`;
+
+    nodeList.innerHTML = '';
+
+    if (!filteredNodes.length) {
+      nodeList.innerHTML = '<div class="graph-node-empty">Nenhum item encontrado para este filtro.</div>';
+      return;
+    }
+
+    filteredNodes.forEach((node) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'graph-node-chip' + (node.id === activeNodeId ? ' is-active' : '');
+      button.dataset.nodeId = node.id;
+      button.innerHTML = `
+        <span class="graph-node-chip-icon ${typeClass(node.type)}"></span>
+        <span class="graph-node-chip-text">${node.label}</span>
+        <span class="graph-node-chip-type">${typeLabel(node.type)}</span>
+      `;
+      button.addEventListener('click', () => focusNode(node.id));
+      nodeList.appendChild(button);
+    });
+  }
+
   function render() {
     const width = container.clientWidth || 800;
     const height = Math.max(container.clientHeight, 450);
@@ -231,9 +467,12 @@ const CLASS_COLORS = {{ class_colors | tojson }};
       svg.append('text').attr('x', width/2).attr('y', height/2)
         .attr('text-anchor','middle').attr('fill','#6b7280').attr('font-size','14')
         .text('Nenhum dado para exibir');
+      nodeList.innerHTML = '<div class="graph-node-empty">Nenhum item para listar.</div>';
+      nodeCount.textContent = 'Sem itens disponíveis';
       return;
     }
 
+    const zoomBehavior = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform));
     const sim = d3.forceSimulation(nodes)
       .force('link', d3.forceLink(links).id(d => d.id).distance(60))
       .force('charge', d3.forceManyBody().strength(-120))
@@ -243,7 +482,8 @@ const CLASS_COLORS = {{ class_colors | tojson }};
     const g = svg.append('g');
 
     // Zoom
-    svg.call(d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => g.attr('transform', e.transform)));
+    svg.call(zoomBehavior);
+    svg.on('click', () => clearActiveSelection());
 
     // Arrow marker
     svg.append('defs').append('marker')
@@ -255,9 +495,24 @@ const CLASS_COLORS = {{ class_colors | tojson }};
       .selectAll('line').data(links).join('line')
       .attr('stroke','rgba(255,255,255,0.12)').attr('stroke-width',0.8);
 
+    const adjacency = new Map();
+    links.forEach((link) => {
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+      if (!adjacency.has(sourceId)) adjacency.set(sourceId, []);
+      if (!adjacency.has(targetId)) adjacency.set(targetId, []);
+      adjacency.get(sourceId).push(targetId);
+      adjacency.get(targetId).push(sourceId);
+    });
+
     const nodeEl = g.append('g').attr('class','nodes')
       .selectAll('g').data(nodes).join('g')
       .attr('cursor','pointer')
+      .on('click', (event, d) => {
+        if (d.type === 'news') return;
+        event.stopPropagation();
+        focusNode(d.id);
+      })
       .call(d3.drag()
         .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
         .on('drag', (e, d) => { d.fx=e.x; d.fy=e.y; })
@@ -325,6 +580,15 @@ const CLASS_COLORS = {{ class_colors | tojson }};
     // Draw node shapes
     nodeEl.each(function(d) {
       const el = d3.select(this);
+      if (d.type !== 'news') {
+        el.append('circle')
+          .attr('class', 'graph-node-highlight')
+          .attr('r', d.size * 1.25)
+          .attr('fill', 'rgba(16, 185, 129, 0.28)')
+          .attr('stroke', 'rgba(125, 211, 252, 0.8)')
+          .attr('stroke-width', 0.7)
+          .attr('opacity', 0);
+      }
       if (d.type === 'entity') {
         drawEntityCompositeIcon(el, d);
       } else if (d.type === 'company') {
@@ -346,13 +610,48 @@ const CLASS_COLORS = {{ class_colors | tojson }};
 
     nodeEl.append('title').text(d => d.label);
 
+    graphState = { nodes, links, nodeEl, linkEl, sim, zoomBehavior, width, height, adjacency };
+    renderDirectory();
+    updateGraphHighlight();
+
     sim.on('tick', () => {
       linkEl
         .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
         .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
-      nodeEl.attr('transform', d => `translate(${d.x},${d.y})`);
+      nodeEl.attr('transform', d => {
+        const scale = d.id === activeNodeId ? 1.45 : (activeNodeId ? 0.95 : 1);
+        return `translate(${d.x},${d.y}) scale(${scale})`;
+      });
     });
   }
+
+  filterInput.addEventListener('input', () => {
+    if (!graphState) return;
+    renderDirectory();
+    const filterValue = normalizeMentionLabel(filterInput.value).toLocaleLowerCase('pt-BR');
+    if (!filterValue) {
+      updateGraphHighlight();
+      return;
+    }
+    const firstMatch = getDirectoryNodes(graphState.nodes).find((node) =>
+      node.label.toLocaleLowerCase('pt-BR').includes(filterValue)
+    );
+    if (firstMatch) {
+      focusNode(firstMatch.id);
+    } else {
+      clearActiveSelection();
+    }
+  });
+
+  decreaseDepthButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    adjustSelectionDepth(-1);
+  });
+
+  increaseDepthButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    adjustSelectionDepth(1);
+  });
 
   render();
   window.addEventListener('resize', render);
