@@ -1,4 +1,4 @@
-// GoiasMonitorPy — global JavaScript
+// GoiasMonitorPy — global JavaScript with HTMX support
 
 // ----- Mobile sidebar -----
 function toggleMobileMenu() {
@@ -49,4 +49,12 @@ document.addEventListener('DOMContentLoaded', () => {
       setTimeout(() => el.remove(), 500);
     }, 5000);
   });
+});
+
+// ----- HTMX integration -----
+document.addEventListener('showToast', function(e) {
+  showToast(e.detail.message, e.detail.type, e.detail.duration || 4000);
+  if (e.detail.reload) {
+    setTimeout(function() { location.reload(); }, 1500);
+  }
 });

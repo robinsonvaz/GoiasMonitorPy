@@ -27,7 +27,9 @@
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       <h2 class="settings-section-title">Perfil</h2>
     </div>
-    <form method="POST" action="{{ url_for('settings') }}" class="settings-form">
+    <form method="POST" action="{{ url_for('settings') }}" class="settings-form"
+      hx-post="/configuracoes"
+      hx-swap="none">
       <div class="form-group">
         <label>Nome completo</label>
         <input type="text" name="full_name" value="{{ profile.full_name if profile else user.full_name }}" placeholder="Seu nome" class="input" />

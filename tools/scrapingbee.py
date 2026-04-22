@@ -1,7 +1,10 @@
 """ScrapingBee Google search tool."""
 from __future__ import annotations
-from dataclasses import dataclass
+
+from typing import Any
+
 import requests
+
 from tools.firecrawl import SearchResult
 
 
@@ -23,8 +26,8 @@ def search(api_key: str, query: str, limit: int = 5) -> list[SearchResult]:
     if not response.ok:
         raise RuntimeError(f"ScrapingBee error [{response.status_code}]: {response.text}")
 
-    data = response.json()
-    organic = data.get("organic_results") or []
+    data: dict[str, Any] = response.json()
+    organic: list[dict[str, Any]] = data.get("organic_results") or []
     return [
         SearchResult(
             url=r.get("url", ""),

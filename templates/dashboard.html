@@ -20,11 +20,17 @@
       <p class="page-subtitle">Visão geral do monitoramento de notícias do estado de Goiás</p>
     </div>
     <div class="flex gap-2">
-      <button class="btn btn-primary btn-sm" id="btn-collect-web" onclick="collectNews()">
+      <button class="btn btn-primary btn-sm"
+        id="btn-collect-web"
+        hx-post="/api/collect-news"
+        hx-swap="none">
         <svg id="icon-collect-web" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
         <span id="label-collect-web">Coletar Web</span>
       </button>
-      <button class="btn btn-secondary btn-sm" id="btn-collect-social" onclick="collectSocial()">
+      <button class="btn btn-secondary btn-sm"
+        id="btn-collect-social"
+        hx-post="/api/collect-news-social"
+        hx-swap="none">
         <svg id="icon-collect-social" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         <span id="label-collect-social">Coletar Redes Sociais</span>
       </button>
@@ -144,39 +150,29 @@
 </div>
 
 <script>
-async function collectNews() {
-  const btn = document.getElementById('btn-collect-web');
-  const label = document.getElementById('label-collect-web');
-  const icon = document.getElementById('icon-collect-web');
-  btn.disabled = true;
-  label.textContent = 'Coletando...';
-  icon.classList.add('spin');
-  try {
-    const res = await fetch('/api/collect-news', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
-    const data = await res.json();
-    showToast(data.success ? `Coleta concluída: ${data.collected} notícia(s).` : (data.error || 'Erro na coleta'), data.success ? 'success' : 'error');
-    if (data.success) setTimeout(() => location.reload(), 1500);
-  } catch(e) { showToast('Erro na coleta', 'error'); }
-  finally { btn.disabled = false; label.textContent = 'Coletar Web'; icon.classList.remove('spin'); }
-}
-
-async function collectSocial() {
-  const btn = document.getElementById('btn-collect-social');
-  const label = document.getElementById('label-collect-social');
-  const icon = document.getElementById('icon-collect-social');
-  btn.disabled = true;
-  label.textContent = 'Coletando...';
-  icon.classList.add('spin');
-  try {
-    const res = await fetch('/api/collect-news-social', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
-    const data = await res.json();
-    const msg = data.credits_exhausted
-      ? `${data.collected} notícia(s) de redes sociais. Créditos insuficientes.`
-      : `${data.collected} notícia(s) de redes sociais coletada(s).`;
-    showToast(data.success ? msg : (data.error || 'Erro'), data.success ? 'success' : 'error');
-    if (data.success) setTimeout(() => location.reload(), 1500);
-  } catch(e) { showToast('Erro na coleta social', 'error'); }
-  finally { btn.disabled = false; label.textContent = 'Coletar Redes Sociais'; icon.classList.remove('spin'); }
-}
+htmx.on('#btn-collect-web', 'htmx:beforeRequest', function(e) {
+  e.target.disabled = true;
+  document.getElementById('label-collect-web').textContent = 'Coletando...';
+  document.getElementById('icon-collect-web').classList.add('spin');
+});
+htmx.on('#btn-collect-web', 'htmx:afterRequest', function(e) {
+  e.target.disabled = false;
+  document.getElementById('label-collect-web').textContent = 'Coletar Web';
+  document.getElementById('icon-collect-web').classList.remove('spin');
+});
+htmx.on('#btn-collect-social', 'htmx:beforeRequest', function(e) {
+  e.target.disabled = true;
+  document.getElementById('label-collect-social').textContent = 'Coletando...';
+  document.getElementById('icon-collect-social').classList.add('spin');
+});
+htmx.on('#btn-collect-social', 'htmx:afterRequest', function(e) {
+  e.target.disabled = false;
+  document.getElementById('label-collect-social').textContent = 'Coletar Redes Sociais';
+  document.getElementById('icon-collect-social').classList.remove('spin');
+});
+document.addEventListener('showToast', function(e) {
+  showToast(e.detail.message, e.detail.type);
+  if (e.detail.reload) setTimeout(function() { location.reload(); }, 1500);
+});
 </script>
 {% endblock %}

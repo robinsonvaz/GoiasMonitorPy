@@ -6,14 +6,13 @@
 -- Pré-requisitos:
 --   1. Extensão pg_cron habilitada (pg_catalog schema)
 --   2. Extensão pg_net habilitada (extensions schema)
---   3. Edge Function "collect-news" deployada
+--   3. Aplicação Flask local em execução (porta 5000)
 --
 -- Este script agenda a coleta automática de notícias a cada 6 horas
 -- (00:00, 06:00, 12:00, 18:00 UTC).
 --
--- IMPORTANTE: Substitua <SUPABASE_URL> e <ANON_KEY> pelos valores reais
--- antes de executar. Esses valores NÃO devem ser versionados em migrations
--- por conterem chaves de acesso.
+-- IMPORTANTE: ajuste a URL local caso a aplicação rode em outra porta
+-- ou host. Este exemplo usa endpoint HTTP local.
 -- ============================================================
 
 -- Habilitar extensões necessárias
@@ -26,8 +25,8 @@ SELECT cron.schedule(
   '0 */6 * * *',
   $$
   SELECT net.http_post(
-    url := '<SUPABASE_URL>/functions/v1/collect-news',
-    headers := '{"Content-Type": "application/json", "Authorization": "Bearer <ANON_KEY>"}'::jsonb,
+    url := 'http://127.0.0.1:5000/api/collect-news',
+    headers := '{"Content-Type": "application/json"}'::jsonb,
     body := '{}'::jsonb
   ) AS request_id;
   $$

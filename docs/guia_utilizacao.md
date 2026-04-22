@@ -315,7 +315,7 @@ O sistema possui uma tarefa agendada que executa a coleta automaticamente:
 
 ### Verificando o status do cron
 
-O status do cron job pode ser consultado na página de **Configurações** do sistema. A documentação técnica completa do agendamento está disponível em `supabase/docs/cron_setup.sql`.
+O status do cron job pode ser consultado na página de **Configurações** do sistema. A documentação técnica completa do agendamento está disponível em `docs/cron_setup.sql`.
 
 ---
 
@@ -357,7 +357,7 @@ R: Até 5 resultados por entidade a cada coleta. Após deduplicação e filtrage
 R: Não. Alertas são gerados apenas em coletas manuais, pois requerem um usuário autenticado para associar o alerta.
 
 **P: Posso alterar a frequência da coleta automática?**  
-R: A frequência é configurada a nível de banco de dados (cron job). Consulte o arquivo `supabase/docs/cron_setup.sql` para instruções de como alterar o intervalo.
+R: A frequência é configurada a nível de banco de dados (cron job). Consulte o arquivo `docs/cron_setup.sql` para instruções de como alterar o intervalo.
 
 **P: O que acontece se eu desativar uma entidade?**  
 R: Ela deixa de ser incluída nas próximas coletas, mas todas as notícias já coletadas permanecem no banco de dados e continuam visíveis na página de Notícias.

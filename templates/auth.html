@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
 </head>
 <body class="auth-page">
 
@@ -24,11 +25,9 @@
     {% if error %}
       <div class="flash flash-error mb-4">{{ error }}</div>
     {% endif %}
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-        <div class="flash flash-{{ category }} mb-4">{{ message }}</div>
-      {% endfor %}
-    {% endwith %}
+    {% for item in flashed_messages %}
+      <div class="flash flash-{{ item.category }} mb-4">{{ item.message }}</div>
+    {% endfor %}
 
     <div class="tab-switch" id="auth-tabs">
       <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">Entrar</button>

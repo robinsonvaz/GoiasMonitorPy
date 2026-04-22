@@ -1,6 +1,9 @@
 """Firecrawl search tool — searches the web via Firecrawl API."""
 from __future__ import annotations
-from dataclasses import dataclass
+
+from dataclasses import dataclass, field
+from typing import Any
+
 import requests
 
 
@@ -8,8 +11,8 @@ import requests
 class SearchResult:
     url: str
     title: str
-    description: str = ""
-    markdown: str = ""
+    description: str = field(default="")
+    markdown: str = field(default="")
 
 
 def search(api_key: str, query: str, limit: int = 5) -> tuple[list[SearchResult], bool]:
@@ -34,14 +37,14 @@ def search(api_key: str, query: str, limit: int = 5) -> tuple[list[SearchResult]
         timeout=30,
     )
 
-    data = response.json()
+    data: dict[str, Any] = response.json()
 
     if not response.ok:
         if response.status_code == 402 or "Insufficient credits" in str(data.get("error", "")):
             return [], True
         raise RuntimeError(f"Firecrawl error: {data}")
 
-    raw = data.get("data") or []
+    raw: list[dict[str, Any]] = data.get("data") or []
     results = [
         SearchResult(
             url=r.get("url", ""),

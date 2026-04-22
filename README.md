@@ -5,7 +5,7 @@ Versão Python/Flask do **GoiasMonitor** — sistema de monitoramento de notíci
 ## Tecnologias
 
 - **Python 3.11** + **Flask**
-- **Supabase** (mesma base de dados do projeto original TypeScript)
+- **MySQL local** (persistência 100% local)
 - Agentes de coleta com **Firecrawl** / **ScrapingBee**
 - Classificação por IA via **Lovable AI Gateway** (Gemini 2.5 Flash)
 - Frontend em HTML/CSS com design dark idêntico ao original
@@ -16,7 +16,7 @@ Versão Python/Flask do **GoiasMonitor** — sistema de monitoramento de notíci
 GoiasMonitorPy/
 ├── app.py                  # Aplicação Flask principal (todas as rotas)
 ├── config.py               # Variáveis de configuração
-├── supabase_client.py      # Clientes Supabase (anon + service role)
+├── db.py                   # Conexão e helpers para banco MySQL local
 ├── agents/
 │   ├── news_collector.py   # Agente de coleta de notícias na web
 │   └── social_collector.py # Agente de coleta em redes sociais
@@ -47,13 +47,18 @@ GoiasMonitorPy/
 ### 1. Editar o `.env`
 
 ```env
-SUPABASE_URL=https://dolewgoxjeegdwwfkkin.supabase.co
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...   # Necessário para os agentes de coleta
-FLASK_SECRET_KEY=...            # Chave secreta aleatória para sessões
-LOVABLE_API_KEY=...             # Para classificação AI
-FIRECRAWL_API_KEY=              # Opcional: crawler principal
-SCRAPINGBEE_API_KEY=            # Opcional: crawler alternativo
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=root
+MYSQL_PASSWORD=root
+MYSQL_DATABASE=goiasmonitor
+LOCAL_ADMIN_EMAIL=admin@local
+LOCAL_ADMIN_PASSWORD=admin123
+LOCAL_ADMIN_NAME=Administrador Local
+FLASK_SECRET_KEY=troque-esta-chave
+LOVABLE_API_KEY=
+FIRECRAWL_API_KEY=
+SCRAPINGBEE_API_KEY=
 ```
 
 ### 2. Ativar o ambiente virtual
@@ -91,5 +96,5 @@ Os botões **"Coletar Web"** e **"Coletar Redes Sociais"** no Dashboard disparam
 Cada agente:
 1. Busca na web via Firecrawl (com fallback para ScrapingBee)
 2. Classifica cada resultado via AI (Gemini 2.5 Flash)
-3. Insere os relevantes no Supabase
+3. Insere os relevantes no banco local (MySQL)
 4. Gera alertas automáticos para conteúdo negativo
