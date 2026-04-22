@@ -9,9 +9,9 @@ from urllib.parse import urlparse
 
 import requests
 
-from config import FIRECRAWL_API_KEY, SCRAPINGBEE_API_KEY, LOVABLE_API_KEY
+from config import LOVABLE_API_KEY
 from db import query_all, execute
-from tools import firecrawl, scrapingbee
+from tools import google_search, ai_classifier
 
 SOCIAL_PLATFORMS = [
     {"prefix": "site:x.com", "label": "X/Twitter"},
@@ -20,10 +20,18 @@ SOCIAL_PLATFORMS = [
 ]
 
 
-def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
-    if not FIRECRAWL_API_KEY and not SCRAPINGBEE_API_KEY:
-        return {"success": False, "error": "Nenhum crawler configurado (Firecrawl ou ScrapingBee)"}
+def _existing_url_set(urls: list[str]) -> set[str]:
+    if not urls:
+        return set()
+    placeholders = ",".join(["%s"] * len(urls))
+    existing_rows = query_all(
+        f"SELECT source_url FROM news_items WHERE source_url IN ({placeholders})",
+        tuple(urls),
+    )
+    return {row["source_url"] for row in existing_rows}
 
+
+def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
     if not LOVABLE_API_KEY:
         return {"success": False, "error": "LOVABLE_API_KEY não configurada"}
 
@@ -42,33 +50,44 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         return {"success": True, "collected": 0, "message": "Nenhuma entidade ativa"}
 
     total_collected = 0
-    firecrawl_exhausted = False
-    used_fallback = False
+    strategy_counts = {"google_news": 0, "open_web": 0}
 
     for entity in entities:
         search_terms = " OR ".join([entity["name"]] + (entity.get("keywords") or []))
-        all_results = []
+        all_results: list[google_search.SearchResult] = []
 
         for platform in SOCIAL_PLATFORMS:
             search_query = f"{platform['prefix']} {search_terms} Goiás"
-            platform_results = []
+            platform_results: list[google_search.SearchResult] = []
+            platform_seen: set[str] = set()
 
-            if FIRECRAWL_API_KEY and not firecrawl_exhausted:
-                try:
-                    hits, exhausted = firecrawl.search(FIRECRAWL_API_KEY, search_query, limit=3)
-                    if exhausted:
-                        firecrawl_exhausted = True
-                    else:
-                        platform_results = hits
-                except Exception as exc:
-                    print(f"[Firecrawl] Error {platform['label']}/{entity['name']}: {exc}")
+            # Strategy 1: Google News for social links indexed there.
+            try:
+                news_results = google_search.search_google_news(search_query, limit=3)
+                for item in news_results:
+                    if item.url in platform_seen:
+                        continue
+                    platform_seen.add(item.url)
+                    platform_results.append(item)
+                strategy_counts["google_news"] += len(news_results)
+            except Exception as exc:
+                print(f"[GoogleNews] Error {platform['label']}/{entity['name']}: {exc}")
 
-            if not platform_results and SCRAPINGBEE_API_KEY:
+            # Strategy 2: open web fallback/expansion when few new links remain.
+            news_urls = [r.url for r in platform_results if r.url]
+            existing_after_news = _existing_url_set(news_urls)
+            unseen_after_news = [r for r in platform_results if r.url not in existing_after_news]
+            if len(unseen_after_news) < 2:
                 try:
-                    platform_results = scrapingbee.search(SCRAPINGBEE_API_KEY, search_query, limit=3)
-                    used_fallback = True
+                    web_results = google_search.search_open_web(search_query, limit=5)
+                    for item in web_results:
+                        if item.url in platform_seen:
+                            continue
+                        platform_seen.add(item.url)
+                        platform_results.append(item)
+                    strategy_counts["open_web"] += len(web_results)
                 except Exception as exc:
-                    print(f"[ScrapingBee] Error {platform['label']}/{entity['name']}: {exc}")
+                    print(f"[OpenWeb] Error {platform['label']}/{entity['name']}: {exc}")
 
             all_results.extend(platform_results)
 
@@ -83,14 +102,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             continue
 
         urls = [r.url for r in results if r.url]
-        existing_urls = set()
-        if urls:
-            placeholders = ",".join(["%s"] * len(urls))
-            existing_rows = query_all(
-                f"SELECT source_url FROM news_items WHERE source_url IN ({placeholders})",
-                tuple(urls),
-            )
-            existing_urls = {row["source_url"] for row in existing_rows}
+        existing_urls = _existing_url_set(urls)
 
         new_results = [r for r in results if r.url not in existing_urls]
         if not new_results:
@@ -130,6 +142,14 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 classified = json.loads(cleaned)
             except json.JSONDecodeError:
                 continue
+
+            merged_mentions = ai_classifier.enrich_people_mentioned(
+                classified.get("people_mentioned") if isinstance(classified, dict) else [],
+                title=classified.get("title") or result.title,
+                content=classified.get("content") or text_content,
+                entity_name=entity["name"],
+            )
+            classified["people_mentioned"] = merged_mentions
 
             if not classified.get("relevant"):
                 continue
@@ -180,17 +200,16 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                     ),
                 )
 
-    msg = None
-    if firecrawl_exhausted:
-        if used_fallback:
-            msg = "Créditos Firecrawl esgotados. ScrapingBee utilizado como alternativa."
-        else:
-            msg = "Créditos Firecrawl esgotados e ScrapingBee indisponível."
+    msg = (
+        "Busca social concluída com 2 estratégias: "
+        f"Google News ({strategy_counts['google_news']} resultados) e "
+        f"Internet aberta ({strategy_counts['open_web']} resultados)."
+    )
 
     return {
         "success": True,
         "collected": total_collected,
-        "credits_exhausted": firecrawl_exhausted,
-        "fallback_used": used_fallback,
+        "google_news_results": strategy_counts["google_news"],
+        "open_web_results": strategy_counts["open_web"],
         "message": msg,
     }

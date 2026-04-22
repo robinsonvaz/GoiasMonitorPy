@@ -34,12 +34,26 @@
     <div class="legend-row">
       <span class="text-xs font-medium text-muted">Legenda:</span>
       <div class="legend-item">
-        <span class="legend-dot" style="background:#0ea5e9;border-radius:2px"></span>
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+          <rect x="1" y="4" width="8" height="8" rx="1.5" fill="#0ea5e9" />
+          <circle cx="10.5" cy="4.5" r="2" fill="#c084fc" stroke="rgba(255,255,255,0.45)" stroke-width="0.5" />
+          <path d="M8.8 8.6c0-1 .8-1.8 1.8-1.8s1.8.8 1.8 1.8" fill="none" stroke="#c084fc" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
         <span class="text-xs">Entidade</span>
       </div>
       <div class="legend-item">
-        <span class="legend-dot legend-diamond" style="background:#a855f7"></span>
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+          <circle cx="7" cy="4.5" r="2.4" fill="#a855f7" stroke="rgba(255,255,255,0.45)" stroke-width="0.5" />
+          <path d="M3.8 10.8c0-1.9 1.4-3.4 3.2-3.4s3.2 1.5 3.2 3.4" fill="none" stroke="#a855f7" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
         <span class="text-xs">Pessoa</span>
+      </div>
+      <div class="legend-item">
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+          <rect x="1.5" y="2" width="4" height="10" rx="0.8" fill="#38bdf8" />
+          <rect x="6.7" y="4" width="5.8" height="8" rx="0.8" fill="#38bdf8" opacity="0.85" />
+        </svg>
+        <span class="text-xs">Empresa</span>
       </div>
       {% for cls, color in class_colors.items() %}
       <div class="legend-item">
@@ -67,13 +81,86 @@ const CLASS_COLORS = {{ class_colors | tojson }};
   const container = document.getElementById('graph-container');
   const svg = d3.select('#graph-svg');
 
+  function isCompanyName(name) {
+    if (!name) return false;
+    const raw = String(name).trim();
+    const text = raw.toLowerCase();
+    const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const goiasOrganizationHints = [
+      'saneago', 'comurg', 'codego', 'agehab', 'goiasfomento', 'goias turismo',
+      'equatorial goias', 'celg', 'fieg', 'fecomercio goias', 'acieg',
+      'sicoob', 'sicredi', 'unimed goiania', 'unimed anapolis'
+    ];
+    if (goiasOrganizationHints.some((term) => normalized.includes(term))) {
+      return true;
+    }
+
+    const personRoleRe = /\b(deputado|deputada|vereador|vereadora|governador|governadora|prefeito|prefeita|senador|senadora|ministro|ministra|secretario|secretaria)\b/i;
+    const institutionalRe = /\b(secretaria\s+de|secretaria\s+da|secretaria\s+do|minist[eé]rio\s+da|minist[eé]rio\s+de|minist[eé]rio\s+do|prefeitura\s+de|prefeitura\s+da|prefeitura\s+do|tribunal\s+de|camara\s+municipal|c[aâ]mara\s+municipal|assembleia\s+legislativa|hospital\s+)/i;
+    if (personRoleRe.test(normalized) && !institutionalRe.test(normalized)) {
+      return false;
+    }
+
+    // Strong legal suffixes and clear company indicators.
+    const strongMarkers = [
+      /\b(ltda|ltda\.|s\/a|s\.a\.|sa|eireli|mei|epp|me)\b/,
+      /\b(holding|inc|corp|corporacao|corporacao|companhia|cia)\b/
+    ];
+    if (strongMarkers.some((re) => re.test(normalized))) {
+      return true;
+    }
+
+    // Business/economic activity markers (more common in organizations than people).
+    const businessKeywords = [
+      'construtora', 'empreendimentos', 'incorporadora', 'cooperativa', 'grupo',
+      'banco', 'financeira', 'comercio', 'industria', 'servicos', 'transportes',
+      'logistica', 'distribuidora', 'mineracao', 'energia', 'saneamento',
+      'telecom', 'hospital', 'clinica', 'laboratorio', 'farmaceutica',
+      'universidade', 'faculdade'
+    ];
+
+    // Terms that frequently appear in institutions/public organizations.
+    const institutionalKeywords = [
+      'instituto', 'fundacao', 'associacao', 'federacao', 'sindicato', 'colegio',
+      'secretaria', 'prefeitura', 'municipio', 'municipal', 'estadual', 'estado de',
+      'governo de', 'tribunal', 'camara', 'câmara', 'assembleia', 'hospital'
+    ];
+
+    const hasBusinessKeyword = businessKeywords.some((k) => normalized.includes(k));
+    const hasInstitutionalKeyword = institutionalKeywords.some((k) => normalized.includes(k));
+
+    // Likely person name pattern: 2-4 words, letters only, without clear company markers.
+    const isLikelyPersonName = /^\p{L}+(?:\s+\p{L}+){1,3}$/u.test(raw);
+    if (isLikelyPersonName && !hasBusinessKeyword && !hasInstitutionalKeyword) {
+      return false;
+    }
+
+    return hasBusinessKeyword || hasInstitutionalKeyword;
+  }
+
+  function normalizeMentionLabel(name) {
+    return String(name || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function meaningfulMentionTokens(name) {
+    const stopwords = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'em', 'para', 'estado', 'goias', 'goiás']);
+    return normalizeMentionLabel(name)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .match(/[a-z0-9]+/g)
+      ?.filter((token) => !stopwords.has(token)) || [];
+  }
+
   function buildGraph(data) {
     const nodes = [];
     const links = [];
     const entityMap = {};
-    const personMap = {};
+    const mentionMap = {};
 
     data.forEach(news => {
+      const newsMentionLinks = new Set();
       const newsId = 'news-' + news.id;
       nodes.push({
         id: newsId,
@@ -94,13 +181,37 @@ const CLASS_COLORS = {{ class_colors | tojson }};
       }
 
       if (news.people_mentioned) {
-        news.people_mentioned.forEach(person => {
-          const pId = 'person-' + person;
-          if (!personMap[person]) {
-            personMap[person] = true;
-            nodes.push({ id: pId, label: person, type: 'person', color: '#a855f7', size: 8 });
+        news.people_mentioned.forEach((rawMention) => {
+          const mention = normalizeMentionLabel(rawMention);
+          if (!mention) {
+            return;
           }
-          links.push({ source: newsId, target: pId });
+
+          const company = isCompanyName(mention);
+          const tokenKey = meaningfulMentionTokens(mention).join('-');
+          const mentionKey = company
+            ? (tokenKey ? 'org-' + tokenKey : 'org-' + mention.toLowerCase())
+            : 'person-' + mention.toLowerCase();
+          const nodeId = mentionKey || ('mention-' + mention.toLowerCase());
+
+          if (!mentionMap[nodeId]) {
+            mentionMap[nodeId] = {
+              id: nodeId,
+              label: mention,
+              type: company ? 'company' : 'person',
+              color: company ? '#38bdf8' : '#a855f7',
+              size: company ? 10 : 9
+            };
+            nodes.push(mentionMap[nodeId]);
+          } else if (mention.length > mentionMap[nodeId].label.length) {
+            mentionMap[nodeId].label = mention;
+          }
+
+          const linkKey = newsId + '::' + nodeId;
+          if (!newsMentionLinks.has(linkKey)) {
+            newsMentionLinks.add(linkKey);
+            links.push({ source: newsId, target: nodeId });
+          }
         });
       }
     });
@@ -153,19 +264,73 @@ const CLASS_COLORS = {{ class_colors | tojson }};
         .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
       );
 
+    function drawBustIcon(el, d) {
+      const scale = d.size / 12;
+      el.append('circle')
+        .attr('cx', 0)
+        .attr('cy', -3 * scale)
+        .attr('r', 2.8 * scale)
+        .attr('fill', d.color)
+        .attr('stroke', 'rgba(255,255,255,0.3)')
+        .attr('stroke-width', 0.5);
+      el.append('path')
+        .attr('d', `M ${-4.8 * scale} ${4.8 * scale} C ${-4.8 * scale} ${1.5 * scale}, ${-2.2 * scale} ${-0.5 * scale}, 0 ${-0.5 * scale} C ${2.2 * scale} ${-0.5 * scale}, ${4.8 * scale} ${1.5 * scale}, ${4.8 * scale} ${4.8 * scale}`)
+        .attr('fill', 'none')
+        .attr('stroke', d.color)
+        .attr('stroke-width', 1.8 * scale)
+        .attr('stroke-linecap', 'round');
+    }
+
+    function drawBuildingIcon(el, d) {
+      const scale = d.size / 12;
+      el.append('rect')
+        .attr('x', -5.2 * scale)
+        .attr('y', -5.8 * scale)
+        .attr('width', 4.8 * scale)
+        .attr('height', 11.2 * scale)
+        .attr('rx', 0.7 * scale)
+        .attr('fill', d.color)
+        .attr('stroke', 'rgba(255,255,255,0.3)')
+        .attr('stroke-width', 0.5);
+      el.append('rect')
+        .attr('x', 0.6 * scale)
+        .attr('y', -3.6 * scale)
+        .attr('width', 4.8 * scale)
+        .attr('height', 9 * scale)
+        .attr('rx', 0.7 * scale)
+        .attr('fill', d.color)
+        .attr('opacity', 0.9)
+        .attr('stroke', 'rgba(255,255,255,0.3)')
+        .attr('stroke-width', 0.5);
+    }
+
+    function drawEntityCompositeIcon(el, d) {
+      drawBuildingIcon(el, d);
+      const scale = d.size / 12;
+      el.append('circle')
+        .attr('cx', 4.7 * scale)
+        .attr('cy', -4.8 * scale)
+        .attr('r', 2.1 * scale)
+        .attr('fill', '#c084fc')
+        .attr('stroke', 'rgba(255,255,255,0.45)')
+        .attr('stroke-width', 0.45);
+      el.append('path')
+        .attr('d', `M ${1.9 * scale} ${0.1 * scale} C ${1.9 * scale} ${-2.1 * scale}, ${3.3 * scale} ${-3.2 * scale}, ${4.7 * scale} ${-3.2 * scale} C ${6.1 * scale} ${-3.2 * scale}, ${7.5 * scale} ${-2.1 * scale}, ${7.5 * scale} ${0.1 * scale}`)
+        .attr('fill', 'none')
+        .attr('stroke', '#c084fc')
+        .attr('stroke-width', 1.2 * scale)
+        .attr('stroke-linecap', 'round');
+    }
+
     // Draw node shapes
     nodeEl.each(function(d) {
       const el = d3.select(this);
       if (d.type === 'entity') {
-        el.append('rect')
-          .attr('x', -d.size/2).attr('y', -d.size/2)
-          .attr('width', d.size).attr('height', d.size)
-          .attr('fill', d.color).attr('stroke','rgba(255,255,255,0.3)').attr('stroke-width',0.5);
+        drawEntityCompositeIcon(el, d);
+      } else if (d.type === 'company') {
+        drawBuildingIcon(el, d);
       } else if (d.type === 'person') {
-        const half = d.size/2;
-        el.append('polygon')
-          .attr('points', `0,${-half} ${half},0 0,${half} ${-half},0`)
-          .attr('fill', d.color).attr('stroke','rgba(255,255,255,0.3)').attr('stroke-width',0.5);
+        drawBustIcon(el, d);
       } else {
         el.append('circle')
           .attr('r', d.size/2)

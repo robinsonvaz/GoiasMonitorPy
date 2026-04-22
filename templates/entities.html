@@ -60,29 +60,33 @@
               </div>
             {% endif %}
           </div>
-          <div class="flex items-center gap-1 flex-shrink-0">
+          <div class="flex items-center gap-2 flex-shrink-0 entity-actions">
             <!-- Toggle active -->
-            <form method="POST" action="{{ url_for('entities') }}" style="display:inline">
+            <form method="POST" action="{{ url_for('entities') }}" class="entity-toggle-form">
               <input type="hidden" name="action" value="toggle" />
               <input type="hidden" name="entity_id" value="{{ entity.id }}" />
-              <input type="hidden" name="is_active" value="{{ 'false' if entity.is_active else 'true' }}" />
-              <button type="submit" class="btn-ghost btn-icon" title="{{ 'Desativar' if entity.is_active else 'Ativar' }}">
-                {% if entity.is_active %}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-success"><path d="M19 9l-7 7-7-7"/></svg>
-                {% else %}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted"><path d="M5 15l7-7 7 7"/></svg>
-                {% endif %}
-              </button>
+              <label class="entity-toggle" title="{{ 'Desativar busca' if entity.is_active else 'Ativar busca' }}">
+                <input
+                  type="checkbox"
+                  name="is_active"
+                  value="true"
+                  {% if entity.is_active %}checked{% endif %}
+                  onchange="this.form.submit()"
+                />
+                <span class="toggle-track">
+                  <span class="toggle-thumb"></span>
+                </span>
+              </label>
             </form>
             <!-- Edit -->
-            <button class="btn-ghost btn-icon" onclick="openEditModal('{{ entity.id }}', '{{ entity.name | replace("'", "\\'") }}', '{{ entity.entity_type }}', '{{ (entity.description or '') | replace("'", "\\'") }}', '{{ (entity.keywords or []) | join(", ") }}')" title="Editar">
+            <button class="btn-ghost btn-icon entity-action-btn entity-action-edit" onclick="openEditModal('{{ entity.id }}', '{{ entity.name | replace("'", "\\'") }}', '{{ entity.entity_type }}', '{{ (entity.description or '') | replace("'", "\\'") }}', '{{ (entity.keywords or []) | join(", ") }}')" title="Editar">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </button>
             <!-- Delete -->
-            <form method="POST" action="{{ url_for('entities') }}" style="display:inline" onsubmit="return confirm('Remover a entidade \'{{ entity.name }}\'?')">
+            <form method="POST" action="{{ url_for('entities') }}" class="entity-action-form" onsubmit="return confirm('Remover a entidade \'{{ entity.name }}\'?')">
               <input type="hidden" name="action" value="delete" />
               <input type="hidden" name="entity_id" value="{{ entity.id }}" />
-              <button type="submit" class="btn-ghost btn-icon text-destructive" title="Remover">
+              <button type="submit" class="btn-ghost btn-icon entity-action-btn entity-action-delete" title="Remover">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
               </button>
             </form>

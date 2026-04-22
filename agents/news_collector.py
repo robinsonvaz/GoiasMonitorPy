@@ -6,15 +6,22 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-from config import FIRECRAWL_API_KEY, SCRAPINGBEE_API_KEY
 from db import query_all, execute
-from tools import firecrawl, scrapingbee, ai_classifier
+from tools import ai_classifier, google_search
+
+
+def _existing_url_set(urls: list[str]) -> set[str]:
+    if not urls:
+        return set()
+    placeholders = ",".join(["%s"] * len(urls))
+    existing_rows = query_all(
+        f"SELECT source_url FROM news_items WHERE source_url IN ({placeholders})",
+        tuple(urls),
+    )
+    return {row["source_url"] for row in existing_rows}
 
 
 def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
-    if not FIRECRAWL_API_KEY and not SCRAPINGBEE_API_KEY:
-        return {"success": False, "error": "Nenhum crawler configurado (Firecrawl ou ScrapingBee)"}
-
     if entity_id:
         entities = query_all(
             "SELECT * FROM monitored_entities WHERE is_active = 1 AND id = %s",
@@ -32,45 +39,48 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         return {"success": True, "collected": 0, "message": "Nenhuma entidade ativa"}
 
     total_collected = 0
-    firecrawl_exhausted = False
-    used_fallback = False
+    strategy_counts = {"google_news": 0, "open_web": 0}
 
     for entity in entities:
         search_terms = " OR ".join([entity["name"]] + (entity.get("keywords") or []))
         search_query = f"{search_terms} Goiás notícia"
 
-        results = []
+        results: list[google_search.SearchResult] = []
+        seen_urls: set[str] = set()
 
-        if FIRECRAWL_API_KEY and not firecrawl_exhausted:
-            try:
-                hits, exhausted = firecrawl.search(FIRECRAWL_API_KEY, search_query, limit=5)
-                if exhausted:
-                    firecrawl_exhausted = True
-                else:
-                    results = hits
-            except Exception as exc:
-                print(f"[Firecrawl] Error for {entity['name']}: {exc}")
+        # Strategy 1: prioritize Google News results.
+        try:
+            news_results = google_search.search_google_news(search_query, limit=5)
+            for item in news_results:
+                if item.url in seen_urls:
+                    continue
+                seen_urls.add(item.url)
+                results.append(item)
+            strategy_counts["google_news"] += len(news_results)
+        except Exception as exc:
+            print(f"[GoogleNews] Error for {entity['name']}: {exc}")
 
-        if not results and SCRAPINGBEE_API_KEY:
+        # Strategy 2 (fallback/expansion): if few *new* candidates remain.
+        current_urls = [r.url for r in results if r.url]
+        existing_after_news = _existing_url_set(current_urls)
+        unseen_after_news = [r for r in results if r.url not in existing_after_news]
+        if len(unseen_after_news) < 3:
             try:
-                results = scrapingbee.search(SCRAPINGBEE_API_KEY, search_query, limit=5)
-                used_fallback = True
+                web_results = google_search.search_open_web(search_query, limit=7)
+                for item in web_results:
+                    if item.url in seen_urls:
+                        continue
+                    seen_urls.add(item.url)
+                    results.append(item)
+                strategy_counts["open_web"] += len(web_results)
             except Exception as exc:
-                print(f"[ScrapingBee] Error for {entity['name']}: {exc}")
-                continue
+                print(f"[OpenWeb] Error for {entity['name']}: {exc}")
 
         if not results:
             continue
 
         urls = [r.url for r in results if r.url]
-        existing_urls = set()
-        if urls:
-            placeholders = ",".join(["%s"] * len(urls))
-            existing_rows = query_all(
-                f"SELECT source_url FROM news_items WHERE source_url IN ({placeholders})",
-                tuple(urls),
-            )
-            existing_urls = {row["source_url"] for row in existing_rows}
+        existing_urls = _existing_url_set(urls)
 
         new_results = [r for r in results if r.url not in existing_urls]
         if not new_results:
@@ -129,17 +139,16 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                     ),
                 )
 
-    msg = None
-    if firecrawl_exhausted:
-        if used_fallback:
-            msg = "Créditos Firecrawl esgotados. ScrapingBee utilizado como alternativa."
-        else:
-            msg = "Créditos Firecrawl esgotados e ScrapingBee indisponível."
+    msg = (
+        "Busca concluída com 2 estratégias: "
+        f"Google News ({strategy_counts['google_news']} resultados) e "
+        f"Internet aberta ({strategy_counts['open_web']} resultados)."
+    )
 
     return {
         "success": True,
         "collected": total_collected,
-        "fallback_used": used_fallback,
-        "firecrawl_exhausted": firecrawl_exhausted,
+        "google_news_results": strategy_counts["google_news"],
+        "open_web_results": strategy_counts["open_web"],
         "message": msg,
     }

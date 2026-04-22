@@ -5,7 +5,7 @@ Analise a notícia e retorne APENAS um JSON válido (sem markdown) com:
   "content": "resumo em 2-3 frases",
   "sentiment": "positivo" | "negativo" | "neutro",
   "classification": "midia_negativa" | "nomeacao" | "exoneracao" | "substituicao" | "troca" | "movimentacao" | "acao_judicial" | "outro",
-  "people_mentioned": ["nome1", "nome2"],
+  "people_mentioned": ["nome1", "empresa ou órgão citado"],
   "relevant": true | false
 }
 Classificações:
@@ -18,3 +18,4 @@ Classificações:
 - acao_judicial: processos, ações judiciais, decisões judiciais
 - outro: não se encaixa nas categorias acima
 Se a notícia NÃO for relevante para "{{entity_name}}" ou para o estado de Goiás, retorne relevant: false.
+Em people_mentioned inclua pessoas e também organizações/empresas citadas (quando houver), sem duplicar itens.
