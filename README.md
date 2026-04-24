@@ -149,6 +149,49 @@ Fluxo resumido:
 5. Persistência em `news_items`
 6. Geração de alertas para casos negativos
 
+
+## Google Alerts e Feeds RSS
+
+Recomendamos complementar a coleta com assinaturas de feeds RSS e com Google Alerts entregues via RSS. Essas fontes gratuitas ajudam a garantir cobertura sem depender exclusivamente de APIs pagas.
+
+Como criar um Google Alert com entrega via RSS:
+
+1. Acesse https://google.com/alerts e faça login com sua conta Google pessoal.
+2. Na caixa de busca, digite sua consulta (ex.: "Governo de Goiás" OR "Goiás" OR "Alego" + nome da entidade).
+3. Clique em "Mostrar opções" (ou no ícone de lápis) e, em "Enviar para"/"Deliver to", escolha a opção de "Feed RSS" quando disponível.
+4. Depois de salvar, clique no ícone de feed (pequeno quadrado laranja) ao lado do alerta para obter a URL do RSS.
+5. Copie essa URL e adicione-a à configuração `GOOGLE_ALERTS_RSS` ou `google_alerts_rss` no seu `.env` (veja exemplo abaixo).
+
+Como encontrar feeds RSS de sites locais (exemplos goianos):
+
+- G1 Goiás — procurar o ícone de RSS na página regional do G1 (ex.: página "Goiás" do G1).
+- Jornais locais (ex.: O Popular, Diário da Manhã) — as seções de notícias costumam expor um feed ou `/{feed,rss}`.
+- Portal do Governo de Goiás — seção de notícias/assessoria de imprensa do governo estadual.
+- Assembleia Legislativa de Goiás (ALEGO) — seção de notícias da ALEGO.
+- Tribunal de Justiça de Goiás (TJ-GO) — seção de notícias do tribunal.
+
+Observação: cada site publica o feed em caminhos diferentes (por exemplo `/feed`, `/rss`, ou `/rss.xml`). Procure o ícone de RSS ou use a busca no site por "RSS".
+
+Exemplo de variáveis no `.env` (JSON arrays aceitos pelo `pydantic`):
+
+```env
+RSS_FEEDS=[
+	"https://g1.globo.com/goias/",            # verificar o caminho /rss no site
+	"https://opopular.com.br/feed/"           # exemplo: jornal local
+]
+
+GOOGLE_ALERTS_RSS=[
+	"https://alerts.google.com/u/0/feeds/1234567890123456789"  # copie a URL do seu alerta
+]
+```
+
+Após adicionar as URLs, rode a coleta normalmente; o agente já tentará consumir `RSS_FEEDS` e `GOOGLE_ALERTS_RSS` antes de recorrer às buscas.
+
+Se quiser, eu posso:
+- ajudar a montar uma lista inicial de feeds goianos e verificar as URLs válidas
+- ou adicionar exemplos reais ao `README.md` (posso buscar e validar os links)
+
+
 ## Reprocessamento de menções
 
 Para recalcular o campo `people_mentioned` com as regras atuais em notícias já salvas:

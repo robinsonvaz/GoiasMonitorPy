@@ -207,7 +207,13 @@ async def dashboard(request: Request, user: UserDep) -> HTMLResponse:
         "SELECT * FROM monitored_entities WHERE is_active = 1 ORDER BY name"
     )
     alerts: list[dict[str, Any]] = query_all(
-        "SELECT * FROM alerts WHERE user_id = %s AND is_read = 0 ORDER BY created_at DESC",
+        """
+        SELECT a.*, n.title AS news_title, n.source_url AS news_source_url
+        FROM alerts a
+        LEFT JOIN news_items n ON n.id = a.news_item_id
+        WHERE a.user_id = %s AND a.is_read = 0
+        ORDER BY a.created_at DESC
+        """,
         (user["id"],),
     )
 
@@ -303,10 +309,12 @@ async def entities_post(
     entity_type: Annotated[str, Form()] = "orgao",
     description: Annotated[str, Form()] = "",
     keywords: Annotated[str, Form()] = "",
+    google_alert_rss_url: Annotated[str, Form()] = "",
     is_active: Annotated[str, Form()] = "",
 ) -> Response:
     keywords_list = [k.strip() for k in keywords.split(",") if k.strip()]
     description_val: str | None = description.strip() or None
+    google_alert_rss_val: str | None = google_alert_rss_url.strip() or None
     error: str | None = None
     try:
         if action == "delete":
@@ -323,22 +331,22 @@ async def entities_post(
         elif action == "edit":
             execute(
                 "UPDATE monitored_entities SET name=%s, entity_type=%s, description=%s,"
-                " keywords=%s, updated_at=NOW(6) WHERE id=%s",
+                " keywords=%s, google_alert_rss_url=%s, updated_at=NOW(6) WHERE id=%s",
                 (
                     name.strip(), entity_type, description_val,
-                    json.dumps(keywords_list, ensure_ascii=False), entity_id,
+                    json.dumps(keywords_list, ensure_ascii=False), google_alert_rss_val, entity_id,
                 ),
             )
             _flash(request, "Entidade atualizada.", "success")
         else:
             execute(
                 "INSERT INTO monitored_entities"
-                " (id, name, entity_type, description, keywords, is_active, created_by,"
+                " (id, name, entity_type, description, keywords, google_alert_rss_url, is_active, created_by,"
                 "  created_at, updated_at)"
-                " VALUES (%s, %s, %s, %s, %s, 1, %s, NOW(6), NOW(6))",
+                " VALUES (%s, %s, %s, %s, %s, %s, 1, %s, NOW(6), NOW(6))",
                 (
                     str(uuid.uuid4()), name.strip(), entity_type, description_val,
-                    json.dumps(keywords_list, ensure_ascii=False), user["id"],
+                    json.dumps(keywords_list, ensure_ascii=False), google_alert_rss_val, user["id"],
                 ),
             )
             _flash(request, "Entidade criada.", "success")
@@ -365,7 +373,7 @@ async def entities_post(
 async def alerts(request: Request, user: UserDep) -> HTMLResponse:
     all_alerts: list[dict[str, Any]] = query_all(
         """
-        SELECT a.*, n.title AS news_title
+        SELECT a.*, n.title AS news_title, n.source_url AS news_source_url
         FROM alerts a
         LEFT JOIN news_items n ON n.id = a.news_item_id
         WHERE a.user_id = %s
@@ -374,7 +382,13 @@ async def alerts(request: Request, user: UserDep) -> HTMLResponse:
         (user["id"],),
     )
     for a in all_alerts:
-        a["news_items"] = {"title": a.pop("news_title")} if a.get("news_title") else None
+        if a.get("news_title"):
+            a["news_items"] = {
+                "title": a.pop("news_title"),
+                "source_url": a.pop("news_source_url", None),
+            }
+        else:
+            a["news_items"] = None
 
     unread_count = sum(1 for a in all_alerts if not a.get("is_read"))
     return _render(request, "alerts.html", alerts=all_alerts, unread_count=unread_count, user=user)
@@ -415,14 +429,20 @@ async def api_mark_alert_read(
         (alert_id, user["id"]),
     )
     alert: dict[str, Any] | None = query_one(
-        "SELECT a.*, n.title AS news_title"
+        "SELECT a.*, n.title AS news_title, n.source_url AS news_source_url"
         " FROM alerts a"
         " LEFT JOIN news_items n ON n.id = a.news_item_id"
         " WHERE a.id = %s",
         (alert_id,),
     )
     if alert:
-        alert["news_items"] = {"title": alert.pop("news_title")} if alert.get("news_title") else None
+        if alert.get("news_title"):
+            alert["news_items"] = {
+                "title": alert.pop("news_title"),
+                "source_url": alert.pop("news_source_url", None),
+            }
+        else:
+            alert["news_items"] = None
     return templates.TemplateResponse(
         request=request,
         name="partials/alert_card.html",

@@ -159,6 +159,8 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             except Exception:
                 source_name = ""
 
+            news_item_id = str(uuid.uuid4())
+
             execute(
                 """
                 INSERT INTO news_items
@@ -167,7 +169,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NOW(6), NOW(6))
                 """,
                 (
-                    str(uuid.uuid4()),
+                    news_item_id,
                     entity["id"],
                     classified.get("title") or result.title,
                     classified.get("content") or result.description or None,
@@ -189,11 +191,12 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                     """
                     INSERT INTO alerts
                     (id, user_id, news_item_id, title, message, alert_type, is_read, created_at)
-                    VALUES (%s, %s, NULL, %s, %s, %s, 0, NOW(6))
+                    VALUES (%s, %s, %s, %s, %s, %s, 0, NOW(6))
                     """,
                     (
                         str(uuid.uuid4()),
                         user_id,
+                        news_item_id,
                         f"Mídia negativa (social): {entity['name']}",
                         classified.get("title") or result.title,
                         "warning",

@@ -59,6 +59,9 @@
                 {% endfor %}
               </div>
             {% endif %}
+            {% if entity.google_alert_rss_url %}
+              <p class="text-xs text-muted mt-1">Google Alert RSS configurado</p>
+            {% endif %}
           </div>
           <div class="flex items-center gap-2 flex-shrink-0 entity-actions">
             <!-- Toggle active -->
@@ -79,7 +82,7 @@
               </label>
             </form>
             <!-- Edit -->
-            <button class="btn-ghost btn-icon entity-action-btn entity-action-edit" onclick="openEditModal('{{ entity.id }}', '{{ entity.name | replace("'", "\\'") }}', '{{ entity.entity_type }}', '{{ (entity.description or '') | replace("'", "\\'") }}', '{{ (entity.keywords or []) | join(", ") }}')" title="Editar">
+            <button class="btn-ghost btn-icon entity-action-btn entity-action-edit" onclick="openEditModal('{{ entity.id }}', '{{ entity.name | replace("'", "\\'") }}', '{{ entity.entity_type }}', '{{ (entity.description or '') | replace("'", "\\'") }}', '{{ (entity.keywords or []) | join(", ") }}', '{{ (entity.google_alert_rss_url or '') | replace("'", "\\'") }}')" title="Editar">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </button>
             <!-- Delete -->
@@ -130,6 +133,10 @@
         <label>Palavras-chave (separadas por vírgula)</label>
         <input type="text" name="keywords" id="modal-keywords" placeholder="saúde, SES-GO, secretário" class="input" />
       </div>
+      <div class="form-group">
+        <label>Google Alert RSS da entidade (opcional)</label>
+        <input type="url" name="google_alert_rss_url" id="modal-google-alert-rss" placeholder="https://www.google.com/alerts/feeds/..." class="input" />
+      </div>
       <button type="submit" class="btn btn-primary btn-full">Salvar</button>
     </form>
   </div>
@@ -144,9 +151,10 @@ function openEntityModal() {
   document.getElementById('modal-type').value = 'orgao';
   document.getElementById('modal-description').value = '';
   document.getElementById('modal-keywords').value = '';
+  document.getElementById('modal-google-alert-rss').value = '';
   document.getElementById('entity-modal').style.display = 'flex';
 }
-function openEditModal(id, name, type, description, keywords) {
+function openEditModal(id, name, type, description, keywords, googleAlertRssUrl) {
   document.getElementById('modal-title').textContent = 'Editar Entidade';
   document.getElementById('modal-action').value = 'edit';
   document.getElementById('modal-entity-id').value = id;
@@ -154,6 +162,7 @@ function openEditModal(id, name, type, description, keywords) {
   document.getElementById('modal-type').value = type;
   document.getElementById('modal-description').value = description;
   document.getElementById('modal-keywords').value = keywords;
+  document.getElementById('modal-google-alert-rss').value = googleAlertRssUrl;
   document.getElementById('entity-modal').style.display = 'flex';
 }
 function closeEntityModal(event) {

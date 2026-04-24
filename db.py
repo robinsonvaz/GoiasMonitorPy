@@ -151,6 +151,19 @@ def ensure_local_schema() -> None:
                     """,
                     (str(uuid.uuid4()), admin_id, LOCAL_ADMIN_NAME.strip()),
                 )
+
+            # Keep entity schema in sync for RSS-by-entity support.
+            try:
+                cur.execute(
+                    """
+                    ALTER TABLE monitored_entities
+                    ADD COLUMN google_alert_rss_url VARCHAR(1024) NULL
+                    """
+                )
+            except Exception as exc:
+                # Duplicate column errors are expected after first migration.
+                if "duplicate column" not in str(exc).lower():
+                    raise
         conn.commit()
 
 
@@ -268,3 +281,16 @@ def ensure_local_schema() -> None:
                     """,
                     (str(uuid.uuid4()), admin_id, LOCAL_ADMIN_NAME.strip()),
                 )
+
+            # Keep entity schema in sync for RSS-by-entity support.
+            try:
+                cur.execute(
+                    """
+                    ALTER TABLE monitored_entities
+                    ADD COLUMN google_alert_rss_url VARCHAR(1024) NULL
+                    """
+                )
+            except Exception as exc:
+                # Duplicate column errors are expected after first migration.
+                if "duplicate column" not in str(exc).lower():
+                    raise

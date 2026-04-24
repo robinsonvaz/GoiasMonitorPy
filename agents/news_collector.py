@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from db import query_all, execute
-from tools import ai_classifier, google_search
+from tools import ai_classifier, google_search, fallbacks
 
 
 def _existing_url_set(urls: list[str]) -> set[str]:
@@ -19,6 +19,18 @@ def _existing_url_set(urls: list[str]) -> set[str]:
         tuple(urls),
     )
     return {row["source_url"] for row in existing_rows}
+
+
+def _fallback_classification(result: google_search.SearchResult) -> dict[str, Any]:
+    return {
+        "title": result.title,
+        "content": result.description or result.markdown or None,
+        "classification": "outro",
+        "sentiment": "neutro",
+        "people_mentioned": [],
+        "relevant": True,
+        "used_ai_fallback": True,
+    }
 
 
 def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
@@ -39,7 +51,8 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         return {"success": True, "collected": 0, "message": "Nenhuma entidade ativa"}
 
     total_collected = 0
-    strategy_counts = {"google_news": 0, "open_web": 0}
+    fallback_classifications = 0
+    strategy_counts = {"rss_feeds": 0, "google_alerts": 0, "google_news": 0, "open_web": 0}
 
     for entity in entities:
         search_terms = " OR ".join([entity["name"]] + (entity.get("keywords") or []))
@@ -48,7 +61,23 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         results: list[google_search.SearchResult] = []
         seen_urls: set[str] = set()
 
-        # Strategy 1: prioritize Google News results.
+        # Strategy 0: try configured RSS feeds and Google Alerts (RSS) first.
+        try:
+            rss_results = fallbacks.collect_for_entity(entity, max_results=6)
+            for item in rss_results:
+                if item.url in seen_urls:
+                    continue
+                seen_urls.add(item.url)
+                results.append(item)
+            # Count hits by source type (best-effort): prefer rss_feeds when config present
+            if RSS_FEEDS := getattr(__import__("config"), "RSS_FEEDS"):
+                strategy_counts["rss_feeds"] += len(rss_results)
+            else:
+                strategy_counts["google_alerts"] += len(rss_results)
+        except Exception as exc:
+            print(f"[RSS/Alerts] Error for {entity['name']}: {exc}")
+
+        # Strategy 1: prioritize Google News results if additional candidates needed.
         try:
             news_results = google_search.search_google_news(search_query, limit=5)
             for item in news_results:
@@ -89,14 +118,19 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         for result in new_results:
             text_content = result.markdown or result.description or result.title
             classified = ai_classifier.classify_news(text_content, result.title, result.url, entity["name"])
+            if not classified:
+                classified = _fallback_classification(result)
+                fallback_classifications += 1
 
-            if not classified or not classified.get("relevant"):
+            if not classified.get("relevant"):
                 continue
 
             try:
                 source_name = (urlparse(result.url).hostname or "").replace("www.", "")
             except Exception:
                 source_name = ""
+
+            news_item_id = str(uuid.uuid4())
 
             execute(
                 """
@@ -106,7 +140,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NOW(6), NOW(6))
                 """,
                 (
-                    str(uuid.uuid4()),
+                    news_item_id,
                     entity["id"],
                     classified.get("title") or result.title,
                     classified.get("content") or result.description or None,
@@ -120,19 +154,23 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             total_collected += 1
 
             negative = (
+                not classified.get("used_ai_fallback")
+                and (
                 classified.get("sentiment") == "negativo"
                 or classified.get("classification") == "midia_negativa"
+                )
             )
             if negative and user_id:
                 execute(
                     """
                     INSERT INTO alerts
                     (id, user_id, news_item_id, title, message, alert_type, is_read, created_at)
-                    VALUES (%s, %s, NULL, %s, %s, %s, 0, NOW(6))
+                    VALUES (%s, %s, %s, %s, %s, %s, 0, NOW(6))
                     """,
                     (
                         str(uuid.uuid4()),
                         user_id,
+                        news_item_id,
                         f"Mídia negativa: {entity['name']}",
                         classified.get("title") or result.title,
                         "warning",
@@ -140,14 +178,18 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 )
 
     msg = (
-        "Busca concluída com 2 estratégias: "
+        "Busca concluída: "
+        f"RSS/Alerts ({strategy_counts['rss_feeds']}) , "
         f"Google News ({strategy_counts['google_news']} resultados) e "
         f"Internet aberta ({strategy_counts['open_web']} resultados)."
     )
+    if fallback_classifications:
+        msg += f" {fallback_classifications} item(ns) foram salvos sem classificação por IA."
 
     return {
         "success": True,
         "collected": total_collected,
+        "fallback_classifications": fallback_classifications,
         "google_news_results": strategy_counts["google_news"],
         "open_web_results": strategy_counts["open_web"],
         "message": msg,

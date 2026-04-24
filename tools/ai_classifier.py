@@ -1,13 +1,33 @@
 """AI classification tool — uses Lovable AI Gateway (OpenAI-compatible)."""
 from __future__ import annotations
 
+import base64
 import json
 import re
+from typing import Callable
 from typing import Any
 
 import requests
 
-from config import LOVABLE_API_KEY
+from config import (
+    API_AI_GO_CONSUMER_KEY,
+    API_AI_GO_CONSUMER_SECRET,
+    API_AI_GO_ENDPOINT,
+    API_AI_GO_MODEL,
+    API_AI_GO_TOKEN_URL,
+    CLAUDE_API_KEY,
+    CLAUDE_MODEL,
+    GOOGLE_API_KEY,
+    GOOGLE_MODEL,
+    GROQ_API_KEY,
+    GROQ_MODEL,
+    MISTRAL_API_KEY,
+    MISTRAL_MODEL,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    XAI_API_KEY,
+    XAI_MODEL,
+)
 
 
 _ORG_PREFIX_RE = re.compile(
@@ -257,6 +277,279 @@ def enrich_people_mentioned(
     return _compact_mentions(merged)
 
 
+def _is_usable_secret(value: str) -> bool:
+    secret = (value or "").strip()
+    if not secret:
+        return False
+    lowered = secret.casefold()
+    placeholders = (
+        "your_",
+        "change_this",
+        "troque-",
+        "placeholder",
+        "example",
+    )
+    return not any(lowered.startswith(prefix) for prefix in placeholders)
+
+
+def is_configured() -> bool:
+    return any(
+        (
+            _is_usable_secret(GOOGLE_API_KEY),
+            _is_usable_secret(OPENAI_API_KEY),
+            _is_usable_secret(CLAUDE_API_KEY),
+            _is_usable_secret(XAI_API_KEY),
+            _is_usable_secret(GROQ_API_KEY),
+            _is_usable_secret(MISTRAL_API_KEY),
+            _is_usable_secret(API_AI_GO_CONSUMER_KEY) and _is_usable_secret(API_AI_GO_CONSUMER_SECRET),
+        )
+    )
+
+
+def _extract_json_text(raw_text: str) -> dict[str, Any] | None:
+    cleaned = re.sub(r"```json\n?|```\n?", "", raw_text or "").strip()
+    if not cleaned:
+        return None
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, flags=re.S)
+        if not match:
+            return None
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+
+
+def _build_user_prompt(title: str, url: str, truncated: str) -> str:
+    return f"Título: {title}\nURL: {url}\nConteúdo:\n{truncated}"
+
+
+def _request_google(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    if not _is_usable_secret(GOOGLE_API_KEY):
+        return None
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{GOOGLE_MODEL}:generateContent?key={GOOGLE_API_KEY}",
+        headers={"Content-Type": "application/json"},
+        json={
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "generationConfig": {"temperature": 0.1},
+        },
+        timeout=30,
+    )
+    if not response.ok:
+        return None
+    data = response.json()
+    candidates = data.get("candidates") or []
+    if not candidates:
+        return None
+    parts = (((candidates[0] or {}).get("content") or {}).get("parts") or [])
+    text = "\n".join(part.get("text", "") for part in parts if isinstance(part, dict))
+    return _extract_json_text(text)
+
+
+def _request_openai_compatible(
+    endpoint: str,
+    api_key: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+) -> dict[str, Any] | None:
+    if not _is_usable_secret(api_key):
+        return None
+    response = requests.post(
+        endpoint,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1,
+        },
+        timeout=30,
+    )
+    if not response.ok:
+        return None
+    data = response.json()
+    text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    return _extract_json_text(text)
+
+
+def _request_claude(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    if not _is_usable_secret(CLAUDE_API_KEY):
+        return None
+    response = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": CLAUDE_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": CLAUDE_MODEL,
+            "max_tokens": 1200,
+            "temperature": 0.1,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
+        },
+        timeout=30,
+    )
+    if not response.ok:
+        return None
+    data = response.json()
+    blocks = data.get("content") or []
+    text = "\n".join(block.get("text", "") for block in blocks if isinstance(block, dict))
+    return _extract_json_text(text)
+
+
+def _get_api_ai_go_token() -> str | None:
+    if not (
+        _is_usable_secret(API_AI_GO_CONSUMER_KEY)
+        and _is_usable_secret(API_AI_GO_CONSUMER_SECRET)
+        and API_AI_GO_TOKEN_URL
+        and API_AI_GO_ENDPOINT
+    ):
+        return None
+
+    basic = base64.b64encode(
+        f"{API_AI_GO_CONSUMER_KEY}:{API_AI_GO_CONSUMER_SECRET}".encode("utf-8")
+    ).decode("ascii")
+    response = requests.post(
+        API_AI_GO_TOKEN_URL,
+        headers={
+            "Authorization": f"Basic {basic}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        data={"grant_type": "client_credentials"},
+        timeout=30,
+    )
+    if not response.ok:
+        return None
+    data = response.json()
+    return data.get("access_token")
+
+
+def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    token = _get_api_ai_go_token()
+    if not token:
+        return None
+    response = requests.post(
+        API_AI_GO_ENDPOINT,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": API_AI_GO_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1,
+        },
+        timeout=30,
+    )
+    if not response.ok:
+        return None
+    data = response.json()
+    text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    return _extract_json_text(text)
+
+
+def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    providers: list[tuple[str, Callable[[], dict[str, Any] | None]]] = [
+        ("google", lambda: _request_google(system_prompt, user_prompt)),
+        (
+            "openai",
+            lambda: _request_openai_compatible(
+                "https://api.openai.com/v1/chat/completions",
+                OPENAI_API_KEY,
+                OPENAI_MODEL,
+                system_prompt,
+                user_prompt,
+            ),
+        ),
+        ("claude", lambda: _request_claude(system_prompt, user_prompt)),
+        (
+            "xai",
+            lambda: _request_openai_compatible(
+                "https://api.x.ai/v1/chat/completions",
+                XAI_API_KEY,
+                XAI_MODEL,
+                system_prompt,
+                user_prompt,
+            ),
+        ),
+        (
+            "groq",
+            lambda: _request_openai_compatible(
+                "https://api.groq.com/openai/v1/chat/completions",
+                GROQ_API_KEY,
+                GROQ_MODEL,
+                system_prompt,
+                user_prompt,
+            ),
+        ),
+        (
+            "mistral",
+            lambda: _request_openai_compatible(
+                "https://api.mistral.ai/v1/chat/completions",
+                MISTRAL_API_KEY,
+                MISTRAL_MODEL,
+                system_prompt,
+                user_prompt,
+            ),
+        ),
+        ("api_ai_go", lambda: _request_api_ai_go(system_prompt, user_prompt)),
+    ]
+
+    for provider_name, provider_call in providers:
+        try:
+            result = provider_call()
+        except Exception:
+            result = None
+        if isinstance(result, dict):
+            result.setdefault("ai_provider", provider_name)
+            return result
+    return None
+
+
+def _chat_completion_request(payload: dict[str, Any]) -> requests.Response:
+    if _is_usable_secret(LOVABLE_API_KEY):
+        return requests.post(
+            "https://ai.gateway.lovable.dev/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {LOVABLE_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=30,
+        )
+
+    if _is_usable_secret(OPENAI_API_KEY):
+        openai_payload = dict(payload)
+        openai_payload["model"] = OPENAI_MODEL or payload.get("model") or "gpt-4o-mini"
+        return requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json=openai_payload,
+            timeout=30,
+        )
+
+    raise RuntimeError("Nenhuma chave de IA válida configurada")
+
+
 def classify_news(text_content: str, title: str, url: str, entity_name: str) -> dict[str, Any] | None:
     """Classify a news article for an entity using the AI gateway.
 
@@ -267,53 +560,24 @@ def classify_news(text_content: str, title: str, url: str, entity_name: str) -> 
 
     with open("prompts/news_classifier.txt", encoding="utf-8") as f:
         system_prompt = f.read().replace("{{entity_name}}", entity_name)
+    user_prompt = _build_user_prompt(title, url, truncated)
+    result = _classify_with_fallbacks(system_prompt, user_prompt)
+    if not isinstance(result, dict):
+        return None
 
-    payload = {
-        "model": "google/gemini-2.5-flash",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": f"Título: {title}\nURL: {url}\nConteúdo:\n{truncated}",
-            },
-        ],
-        "temperature": 0.1,
-    }
+    base_mentions: list[Any] = []
+    if isinstance(result.get("people_mentioned"), list):
+        base_mentions.extend(result["people_mentioned"])
 
-    response = requests.post(
-        "https://ai.gateway.lovable.dev/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {LOVABLE_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=30,
+    for key in ("organizations_mentioned", "companies_mentioned", "entities_mentioned"):
+        value = result.get(key)
+        if isinstance(value, list):
+            base_mentions.extend(value)
+
+    result["people_mentioned"] = enrich_people_mentioned(
+        base_mentions,
+        title=title,
+        content=truncated,
+        entity_name=entity_name,
     )
-
-    if not response.ok:
-        return None
-
-    raw: dict[str, Any] = response.json()
-    content: str = raw.get("choices", [{}])[0].get("message", {}).get("content", "")
-    cleaned = re.sub(r"```json\n?|```\n?", "", content).strip()
-
-    try:
-        result: dict[str, Any] = json.loads(cleaned)
-        base_mentions: list[Any] = []
-        if isinstance(result.get("people_mentioned"), list):
-            base_mentions.extend(result["people_mentioned"])
-
-        for key in ("organizations_mentioned", "companies_mentioned", "entities_mentioned"):
-            value = result.get(key)
-            if isinstance(value, list):
-                base_mentions.extend(value)
-
-        result["people_mentioned"] = enrich_people_mentioned(
-            base_mentions,
-            title=title,
-            content=truncated,
-            entity_name=entity_name,
-        )
-        return result
-    except json.JSONDecodeError:
-        return None
+    return result

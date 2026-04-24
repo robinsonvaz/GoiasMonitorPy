@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -31,8 +32,34 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DEBUG", "FLASK_DEBUG"),
     )
     lovable_api_key: str = Field(default="")
+    google_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "GOOGLE_API_Key"),
+    )
+    google_model: str = Field(default="gemini-2.5-flash")
+    openai_api_key: str = Field(default="")
+    openai_model: str = Field(default="gpt-4o-mini")
+    claude_api_key: str = Field(default="")
+    claude_model: str = Field(default="claude-3-5-sonnet-20241022")
+    xai_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("XAI_API_KEY", "xAI_API_KEY"),
+    )
+    xai_model: str = Field(default="grok-3-mini")
+    groq_api_key: str = Field(default="")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
+    mistral_api_key: str = Field(default="")
+    mistral_model: str = Field(default="mistral-small-latest")
+    api_ai_go_consumer_key: str = Field(default="")
+    api_ai_go_consumer_secret: str = Field(default="")
+    api_ai_go_token_url: str = Field(default="")
+    api_ai_go_base_url: str = Field(default="")
+    api_ai_go_endpoint: str = Field(default="")
+    api_ai_go_model: str = Field(default="llama-31-8b-instruct")
     firecrawl_api_key: str = Field(default="")
     scrapingbee_api_key: str = Field(default="")
+    rss_feeds: list[str] = Field(default_factory=list)
+    google_alerts_rss: list[str] = Field(default_factory=list)
 
 
 settings = Settings()
@@ -49,5 +76,25 @@ LOCAL_ADMIN_NAME = settings.local_admin_name
 FLASK_SECRET_KEY = settings.app_secret_key
 FLASK_DEBUG = settings.debug
 LOVABLE_API_KEY = settings.lovable_api_key
+GOOGLE_API_KEY = settings.google_api_key
+GOOGLE_MODEL = settings.google_model
+OPENAI_API_KEY = settings.openai_api_key
+OPENAI_MODEL = settings.openai_model
+CLAUDE_API_KEY = settings.claude_api_key
+CLAUDE_MODEL = settings.claude_model
+XAI_API_KEY = settings.xai_api_key
+XAI_MODEL = settings.xai_model
+GROQ_API_KEY = settings.groq_api_key
+GROQ_MODEL = settings.groq_model
+MISTRAL_API_KEY = settings.mistral_api_key
+MISTRAL_MODEL = settings.mistral_model
+API_AI_GO_CONSUMER_KEY = settings.api_ai_go_consumer_key
+API_AI_GO_CONSUMER_SECRET = settings.api_ai_go_consumer_secret
+API_AI_GO_TOKEN_URL = settings.api_ai_go_token_url
+API_AI_GO_BASE_URL = settings.api_ai_go_base_url
+API_AI_GO_ENDPOINT = settings.api_ai_go_endpoint
+API_AI_GO_MODEL = settings.api_ai_go_model
 FIRECRAWL_API_KEY = settings.firecrawl_api_key
 SCRAPINGBEE_API_KEY = settings.scrapingbee_api_key
+RSS_FEEDS = settings.rss_feeds
+GOOGLE_ALERTS_RSS = settings.google_alerts_rss
