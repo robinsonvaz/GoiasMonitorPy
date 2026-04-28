@@ -51,6 +51,19 @@ _WEAK_MATCH_TOKENS = {
     "vice",
     "go",
 }
+_RELATED_CONTENT_SPLIT_RE = re.compile(
+    r"\b(?:leia|veja|confira|entenda|saiba|assista)\s+tamb[eé]m\b|"
+    r"\bnot[ií]cias\s+relacionadas\b|"
+    r"\bconte[uú]do\s+relacionado\b|"
+    r"\bmat[eé]rias\s+relacionadas\b|"
+    r"\bmais\s+lidas?\b|"
+    r"\bmais\s+do\s+g1\b|"
+    r"\brecomendad[oa]s?\b|"
+    r"\bveja\s+mais\b|"
+    r"\bcontinue\s+lendo\b",
+    flags=re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _make_result(url: str, title: str, description: str = "") -> SearchResult:
@@ -65,6 +78,27 @@ def _normalize_text(value: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _clean_candidate_text(value: str, max_sentences: int = 3, max_chars: int = 420) -> str:
+    text = unescape(value or "")
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+
+    marker_match = _RELATED_CONTENT_SPLIT_RE.search(text)
+    if marker_match:
+        text = text[:marker_match.start()].strip(" -:|\t\n\r")
+
+    if not text:
+        return ""
+
+    sentences = [part.strip() for part in _SENTENCE_SPLIT_RE.split(text) if part.strip()]
+    if sentences:
+        text = " ".join(sentences[:max_sentences])
+
+    return text[:max_chars].strip()
 
 
 def _matches_filter_terms(title: str, summary: str, filter_terms: List[str] | None) -> bool:
@@ -184,7 +218,7 @@ def fetch_rss_entries(
             if not link or link in seen:
                 continue
             title = (e.get("title") or "").strip()
-            summary = (e.get("summary") or e.get("description") or "").strip()
+            summary = _clean_candidate_text((e.get("summary") or e.get("description") or "").strip())
             if tag_terms is not None and not _matches_entity_tags(title, summary, tag_terms):
                 continue
             if not _matches_filter_terms(title, summary, terms):
@@ -209,7 +243,8 @@ def extract_article_text(url: str) -> str | None:
         if not downloaded:
             return None
         text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
-        return text
+        cleaned = _clean_candidate_text(text or "", max_sentences=6, max_chars=1800)
+        return cleaned or None
     except Exception:
         return None
 
@@ -276,6 +311,12 @@ def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]
     )
     merged_hits = _merge_unique_results(entity_ga_hits, ga_hits, rss_hits, limit=max_results)
     if merged_hits:
+        for item in merged_hits:
+            article_text = extract_article_text(item.url)
+            if article_text:
+                item.description = article_text
+            else:
+                item.description = _clean_candidate_text(item.description, max_sentences=3, max_chars=600)
         return merged_hits
 
     # 3) Nothing found here — return empty list so caller can run search fallbacks

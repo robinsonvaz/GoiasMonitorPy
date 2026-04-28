@@ -12,6 +12,16 @@ import requests
 from ddgs import DDGS
 from googlesearch import search as google_search
 
+try:
+    # Work around ddgs/primp profile drift that emits
+    # "Impersonate 'chrome_130' does not exist, using 'random'".
+    from ddgs.http_client import HttpClient as _DDGSHttpClient
+
+    _DDGSHttpClient._impersonates = ("random",)
+except Exception:
+    # Keep search working even if ddgs internals change.
+    pass
+
 # Keep query cadence slower to reduce provider throttling.
 MIN_QUERY_INTERVAL_SECONDS = 2.5
 MAX_QUERY_INTERVAL_SECONDS = 5.5

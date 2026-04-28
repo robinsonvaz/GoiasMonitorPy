@@ -34,6 +34,18 @@ _ORG_PREFIX_RE = re.compile(
     r"^(secretaria|minist[eé]rio|prefeitura|munic[ií]pio|tribunal|assembleia|c[aâ]mara|hospital|sociedade|sindsa[uú]de)\b",
     re.IGNORECASE,
 )
+_RELATED_CONTENT_SPLIT_RE = re.compile(
+    r"\b(?:leia|veja|confira|entenda|saiba|assista)\s+tamb[eé]m\b|"
+    r"\bnot[ií]cias\s+relacionadas\b|"
+    r"\bconte[uú]do\s+relacionado\b|"
+    r"\bmat[eé]rias\s+relacionadas\b|"
+    r"\bmais\s+lidas?\b|"
+    r"\bmais\s+do\s+g1\b|"
+    r"\brecomendad[oa]s?\b|"
+    r"\bveja\s+mais\b|"
+    r"\bcontinue\s+lendo\b",
+    flags=re.IGNORECASE,
+)
 
 
 def _is_org_like(value: str) -> bool:
@@ -184,6 +196,18 @@ def _compact_mentions(values: list[str]) -> list[str]:
 def _normalize_mention(value: str) -> str:
     cleaned = re.sub(r"\s+", " ", value).strip(" \t\n\r,.;:-")
     return cleaned
+
+
+def _sanitize_news_text(value: str, max_chars: int = 3000) -> str:
+    text = re.sub(r"\s+", " ", value or "").strip()
+    if not text:
+        return ""
+
+    marker_match = _RELATED_CONTENT_SPLIT_RE.search(text)
+    if marker_match:
+        text = text[:marker_match.start()].strip(" -:|\t\n\r")
+
+    return text[:max_chars].strip()
 
 
 def _extract_company_mentions(text: str) -> list[str]:
@@ -556,7 +580,9 @@ def classify_news(text_content: str, title: str, url: str, entity_name: str) -> 
     Returns a dict with keys: title, content, sentiment, classification,
     people_mentioned, relevant — or None on failure.
     """
-    truncated = text_content[:3000]
+    truncated = _sanitize_news_text(text_content)
+    if not truncated:
+        truncated = (title or "")[:3000]
 
     with open("prompts/news_classifier.txt", encoding="utf-8") as f:
         system_prompt = f.read().replace("{{entity_name}}", entity_name)
