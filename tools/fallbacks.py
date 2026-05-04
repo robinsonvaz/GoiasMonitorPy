@@ -64,6 +64,17 @@ _RELATED_CONTENT_SPLIT_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_GOIAS_CONTEXT_MARKERS = (
+    "goias",
+    "goias.gov.br",
+    "go.gov.br",
+    "goiana",
+    "goiano",
+    "goiania",
+    "governador de goias",
+    "estado de goias",
+    "alego",
+)
 
 
 def _make_result(url: str, title: str, description: str = "") -> SearchResult:
@@ -80,7 +91,11 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _clean_candidate_text(value: str, max_sentences: int = 3, max_chars: int = 420) -> str:
+def _clean_candidate_text(
+    value: str,
+    max_sentences: int | None = 3,
+    max_chars: int | None = 420,
+) -> str:
     text = unescape(value or "")
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
@@ -95,10 +110,105 @@ def _clean_candidate_text(value: str, max_sentences: int = 3, max_chars: int = 4
         return ""
 
     sentences = [part.strip() for part in _SENTENCE_SPLIT_RE.split(text) if part.strip()]
-    if sentences:
+    if sentences and max_sentences is not None:
         text = " ".join(sentences[:max_sentences])
 
-    return text[:max_chars].strip()
+    if max_chars is not None:
+        text = text[:max_chars]
+
+    return text.strip()
+
+
+def _build_entity_variations(entity_terms: List[str] | None) -> List[str]:
+    raw_terms = [term for term in (entity_terms or []) if term and term.strip()]
+    variations: list[str] = []
+    seen: set[str] = set()
+
+    for term in raw_terms:
+        normalized = _normalize_text(term)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        variations.append(normalized)
+
+        compact = normalized.replace(" ", "")
+        if compact and compact not in seen:
+            seen.add(compact)
+            variations.append(compact)
+
+    variations.sort(key=len, reverse=True)
+    return variations
+
+
+def _has_goias_context(text: str) -> bool:
+    hay = _normalize_text(text)
+    if not hay:
+        return False
+    compact_hay = hay.replace(" ", "")
+    for marker in _GOIAS_CONTEXT_MARKERS:
+        normalized_marker = _normalize_text(marker)
+        if not normalized_marker:
+            continue
+        if normalized_marker in hay:
+            return True
+        if normalized_marker.replace(" ", "") in compact_hay:
+            return True
+    return False
+
+
+def _matches_entity_variations(text: str, variations: List[str]) -> bool:
+    hay = _normalize_text(text)
+    if not hay or not variations:
+        return False
+
+    hay_tokens = set(hay.split())
+    compact_hay = hay.replace(" ", "")
+
+    for variation in variations:
+        if not variation:
+            continue
+        if variation in hay:
+            return True
+
+        compact_variation = variation.replace(" ", "")
+        if compact_variation and compact_variation in compact_hay:
+            return True
+
+        var_tokens = [
+            token for token in variation.split()
+            if token not in _TERM_STOPWORDS and token not in _WEAK_MATCH_TOKENS and len(token) > 2
+        ]
+        if len(var_tokens) < 2:
+            continue
+
+        overlap = sum(1 for token in var_tokens if token in hay_tokens)
+        if overlap >= min(2, len(var_tokens)):
+            return True
+
+    return False
+
+
+def is_relevant_for_goias_entity(
+    title: str,
+    summary: str,
+    full_text: str,
+    entity_terms: List[str] | None,
+) -> bool:
+    """Strict relevance check for Goiás entities using full article context.
+
+    A candidate is considered relevant only when:
+    - the combined context contains Goiás markers; and
+    - at least one strong variation of the entity name/keywords appears in context.
+    """
+    variations = _build_entity_variations(entity_terms)
+    context_blob = "\n".join(part for part in [title, summary, full_text] if part)
+    if not context_blob:
+        return False
+    if not _has_goias_context(context_blob):
+        return False
+    if not _matches_entity_variations(context_blob, variations):
+        return False
+    return True
 
 
 def _matches_filter_terms(title: str, summary: str, filter_terms: List[str] | None) -> bool:
@@ -197,6 +307,8 @@ def fetch_rss_entries(
     filter_terms: List[str] | None = None,
     limit: int = 10,
     tag_terms: List[str] | None = None,
+    strict_entity_terms: List[str] | None = None,
+    require_goias_context: bool = False,
 ) -> List[SearchResult]:
     """Fetch and filter entries from a list of RSS/Atom URLs.
 
@@ -205,6 +317,7 @@ def fetch_rss_entries(
     results: List[SearchResult] = []
     seen: set[str] = set()
     terms = [t.lower() for t in (filter_terms or [])]
+    strict_variations = _build_entity_variations(strict_entity_terms)
 
     for feed_url in feed_urls or []:
         try:
@@ -224,8 +337,23 @@ def fetch_rss_entries(
             if not _matches_filter_terms(title, summary, terms):
                 continue
 
+            full_text = ""
+            context_blob = "\n".join(part for part in [title, summary] if part)
+            if strict_variations or require_goias_context:
+                # Fast-path using title/summary first to avoid expensive extraction on obvious misses.
+                if require_goias_context and not _has_goias_context(context_blob):
+                    continue
+                if strict_variations and not _matches_entity_variations(context_blob, strict_variations):
+                    continue
+
+            if full_text:
+                summary = _clean_candidate_text(full_text, max_sentences=3, max_chars=700)
+
             seen.add(link)
-            results.append(_make_result(link, title or link, summary))
+            item = _make_result(link, title or link, summary)
+            if full_text:
+                item.markdown = full_text
+            results.append(item)
             if len(results) >= limit:
                 return results
         # be polite between feed calls
@@ -234,7 +362,7 @@ def fetch_rss_entries(
     return results
 
 
-def extract_article_text(url: str) -> str | None:
+def extract_article_text(url: str, summary_mode: bool = True) -> str | None:
     """Attempt to extract article body using trafilatura when available."""
     if trafilatura is None:
         return None
@@ -243,7 +371,10 @@ def extract_article_text(url: str) -> str | None:
         if not downloaded:
             return None
         text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
-        cleaned = _clean_candidate_text(text or "", max_sentences=6, max_chars=1800)
+        if summary_mode:
+            cleaned = _clean_candidate_text(text or "", max_sentences=6, max_chars=1800)
+        else:
+            cleaned = _clean_candidate_text(text or "", max_sentences=None, max_chars=120000)
         return cleaned or None
     except Exception:
         return None
@@ -285,6 +416,7 @@ def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]
 
     terms = [name] + keywords
     terms = [t for t in terms if t]
+    strict_entity_terms = terms[:]
 
     entity_google_alert_feed = (entity.get("google_alert_rss_url") or "").strip()
     entity_google_alert_feeds = [entity_google_alert_feed] if entity_google_alert_feed else []
@@ -295,26 +427,33 @@ def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]
         entity_google_alert_feeds,
         filter_terms=terms,
         tag_terms=tag_terms,
+        strict_entity_terms=strict_entity_terms,
+        require_goias_context=True,
         limit=max_results,
     )
     ga_hits = fetch_rss_entries(
         GOOGLE_ALERTS_RSS,
         filter_terms=terms,
         tag_terms=tag_terms,
+        strict_entity_terms=strict_entity_terms,
+        require_goias_context=True,
         limit=max_results,
     )
     rss_hits = fetch_rss_entries(
         RSS_FEEDS,
         filter_terms=terms,
         tag_terms=tag_terms,
+        strict_entity_terms=strict_entity_terms,
+        require_goias_context=True,
         limit=max_results,
     )
     merged_hits = _merge_unique_results(entity_ga_hits, ga_hits, rss_hits, limit=max_results)
     if merged_hits:
         for item in merged_hits:
-            article_text = extract_article_text(item.url)
+            article_text = item.markdown or extract_article_text(item.url, summary_mode=False)
             if article_text:
-                item.description = article_text
+                item.markdown = article_text
+                item.description = _clean_candidate_text(article_text, max_sentences=3, max_chars=700)
             else:
                 item.description = _clean_candidate_text(item.description, max_sentences=3, max_chars=600)
         return merged_hits

@@ -12,6 +12,7 @@ import requests
 from config import LOVABLE_API_KEY
 from db import query_all, execute
 from tools import google_search, ai_classifier
+from tools.news_dedup import build_dedup_fields, find_existing_news_duplicate, normalize_url
 
 SOCIAL_PLATFORMS = [
     {"prefix": "site:x.com", "label": "X/Twitter"},
@@ -24,11 +25,12 @@ def _existing_url_set(urls: list[str]) -> set[str]:
     if not urls:
         return set()
     placeholders = ",".join(["%s"] * len(urls))
+    normalized = [normalize_url(url) for url in urls if url]
     existing_rows = query_all(
-        f"SELECT source_url FROM news_items WHERE source_url IN ({placeholders})",
-        tuple(urls),
+        f"SELECT source_url_norm FROM news_items WHERE source_url_norm IN ({placeholders})",
+        tuple(normalized),
     )
-    return {row["source_url"] for row in existing_rows}
+    return {row["source_url_norm"] for row in existing_rows if row.get("source_url_norm")}
 
 
 def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
@@ -74,9 +76,9 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 print(f"[GoogleNews] Error {platform['label']}/{entity['name']}: {exc}")
 
             # Strategy 2: open web fallback/expansion when few new links remain.
-            news_urls = [r.url for r in platform_results if r.url]
+            news_urls = [normalize_url(r.url) for r in platform_results if r.url]
             existing_after_news = _existing_url_set(news_urls)
-            unseen_after_news = [r for r in platform_results if r.url not in existing_after_news]
+            unseen_after_news = [r for r in platform_results if normalize_url(r.url) not in existing_after_news]
             if len(unseen_after_news) < 2:
                 try:
                     web_results = google_search.search_open_web(search_query, limit=5)
@@ -101,10 +103,10 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         if not results:
             continue
 
-        urls = [r.url for r in results if r.url]
+        urls = [normalize_url(r.url) for r in results if r.url]
         existing_urls = _existing_url_set(urls)
 
-        new_results = [r for r in results if r.url not in existing_urls]
+        new_results = [r for r in results if normalize_url(r.url) not in existing_urls]
         if not new_results:
             continue
 
@@ -112,7 +114,8 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             base_prompt = f.read().replace("{{entity_name}}", entity["name"])
 
         for result in new_results:
-            text_content = (result.markdown or result.description or result.title)[:3000]
+            full_content = (result.markdown or result.description or result.title)
+            text_content = full_content[:3000]
             resp = requests.post(
                 "https://ai.gateway.lovable.dev/v1/chat/completions",
                 headers={
@@ -154,6 +157,22 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             if not classified.get("relevant"):
                 continue
 
+            dedup_fields = build_dedup_fields(
+                title=classified.get("title") or result.title,
+                content=classified.get("content") or result.description,
+                full_text=full_content,
+                source_url=result.url,
+            )
+            existing_duplicate_id = find_existing_news_duplicate(
+                source_url=result.url,
+                source_url_norm=dedup_fields["source_url_norm"],
+                title_norm=dedup_fields["title_norm"],
+                content_hash=dedup_fields["content_hash"],
+                dedup_key=dedup_fields["dedup_key"],
+            )
+            if existing_duplicate_id:
+                continue
+
             try:
                 source_name = (urlparse(result.url).hostname or "").replace("www.", "")
             except Exception:
@@ -164,17 +183,23 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             execute(
                 """
                 INSERT INTO news_items
-                (id, entity_id, title, content, source_url, source_name, classification, sentiment,
+                (id, entity_id, title, content, full_content, source_url, source_url_norm, source_name,
+                 title_norm, content_hash, dedup_key, classification, sentiment,
                  people_mentioned, published_at, collected_at, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NOW(6), NOW(6))
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NOW(6), NOW(6))
                 """,
                 (
                     news_item_id,
                     entity["id"],
                     classified.get("title") or result.title,
                     classified.get("content") or result.description or None,
+                    full_content,
                     result.url,
+                    dedup_fields["source_url_norm"],
                     source_name,
+                    dedup_fields["title_norm"],
+                    dedup_fields["content_hash"],
+                    dedup_fields["dedup_key"],
                     classified.get("classification", "outro"),
                     classified.get("sentiment", "neutro"),
                     json.dumps(classified.get("people_mentioned") or [], ensure_ascii=False),

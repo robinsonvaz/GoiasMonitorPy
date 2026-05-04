@@ -164,6 +164,46 @@ def ensure_local_schema() -> None:
                 # Duplicate column errors are expected after first migration.
                 if "duplicate column" not in str(exc).lower():
                     raise
+
+            # Keep news schema in sync for full article archival.
+            try:
+                cur.execute(
+                    """
+                    ALTER TABLE news_items
+                    ADD COLUMN full_text LONGTEXT NULL
+                    """
+                )
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+
+            # Keep news schema in sync for full article storage (embedding-ready).
+            try:
+                cur.execute(
+                    """
+                    ALTER TABLE news_items
+                    ADD COLUMN full_content LONGTEXT NULL
+                    """
+                )
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+
+            # Keep news schema in sync for dedup metadata.
+            for statement in (
+                "ALTER TABLE news_items ADD COLUMN source_url_norm VARCHAR(1200) NULL",
+                "ALTER TABLE news_items ADD COLUMN title_norm VARCHAR(600) NULL",
+                "ALTER TABLE news_items ADD COLUMN content_hash CHAR(64) NULL",
+                "ALTER TABLE news_items ADD COLUMN dedup_key CHAR(64) NULL",
+                "CREATE INDEX idx_news_items_source_url_norm ON news_items (source_url_norm(255))",
+                "CREATE INDEX idx_news_items_dedup_key ON news_items (dedup_key)",
+            ):
+                try:
+                    cur.execute(statement)
+                except Exception as exc:
+                    err = str(exc).lower()
+                    if "duplicate column" not in err and "duplicate key name" not in err:
+                        raise
         conn.commit()
 
 
@@ -294,3 +334,43 @@ def ensure_local_schema() -> None:
                 # Duplicate column errors are expected after first migration.
                 if "duplicate column" not in str(exc).lower():
                     raise
+
+            # Keep news schema in sync for full article archival.
+            try:
+                cur.execute(
+                    """
+                    ALTER TABLE news_items
+                    ADD COLUMN full_text LONGTEXT NULL
+                    """
+                )
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+
+            # Keep news schema in sync for full article storage (embedding-ready).
+            try:
+                cur.execute(
+                    """
+                    ALTER TABLE news_items
+                    ADD COLUMN full_content LONGTEXT NULL
+                    """
+                )
+            except Exception as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+
+            # Keep news schema in sync for dedup metadata.
+            for statement in (
+                "ALTER TABLE news_items ADD COLUMN source_url_norm VARCHAR(1200) NULL",
+                "ALTER TABLE news_items ADD COLUMN title_norm VARCHAR(600) NULL",
+                "ALTER TABLE news_items ADD COLUMN content_hash CHAR(64) NULL",
+                "ALTER TABLE news_items ADD COLUMN dedup_key CHAR(64) NULL",
+                "CREATE INDEX idx_news_items_source_url_norm ON news_items (source_url_norm(255))",
+                "CREATE INDEX idx_news_items_dedup_key ON news_items (dedup_key)",
+            ):
+                try:
+                    cur.execute(statement)
+                except Exception as exc:
+                    err = str(exc).lower()
+                    if "duplicate column" not in err and "duplicate key name" not in err:
+                        raise

@@ -50,7 +50,19 @@ class Settings(BaseSettings):
     groq_model: str = Field(default="llama-3.3-70b-versatile")
     mistral_api_key: str = Field(default="")
     mistral_model: str = Field(default="mistral-small-latest")
-    api_ai_go_consumer_key: str = Field(default="")
+    huggingface_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("HUGGINGFACE_API_KEY"),
+    )
+    huggingface_model: str = Field(default="Qwen/Qwen2-7B-Instruct")
+    cohere_api_key: str = Field(default="")
+    cohere_model: str = Field(default="command-r-08-2024")
+    cerebras_api_key: str = Field(default="")
+    cerebras_model: str = Field(default="qwen-3-235b-a22b-instruct-2507")
+    api_ai_go_consumer_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("API_AI_GO_CONSUMER_KEY", "GEMINI_API_KEI_GOV"),
+    )
     api_ai_go_consumer_secret: str = Field(default="")
     api_ai_go_token_url: str = Field(default="")
     api_ai_go_base_url: str = Field(default="")
@@ -60,6 +72,9 @@ class Settings(BaseSettings):
     scrapingbee_api_key: str = Field(default="")
     rss_feeds: list[str] = Field(default_factory=list)
     google_alerts_rss: list[str] = Field(default_factory=list)
+    news_collection_workers: int = Field(default=4)
+    news_classifier_max_chars: int = Field(default=120000)
+    ai_request_timeout_seconds: int = Field(default=30)
 
 
 settings = Settings()
@@ -88,6 +103,12 @@ GROQ_API_KEY = settings.groq_api_key
 GROQ_MODEL = settings.groq_model
 MISTRAL_API_KEY = settings.mistral_api_key
 MISTRAL_MODEL = settings.mistral_model
+HUGGINGFACE_API_KEY = settings.huggingface_api_key
+HUGGINGFACE_MODEL = settings.huggingface_model
+COHERE_API_KEY = settings.cohere_api_key
+COHERE_MODEL = settings.cohere_model
+CEREBRAS_API_KEY = settings.cerebras_api_key
+CEREBRAS_MODEL = settings.cerebras_model
 API_AI_GO_CONSUMER_KEY = settings.api_ai_go_consumer_key
 API_AI_GO_CONSUMER_SECRET = settings.api_ai_go_consumer_secret
 API_AI_GO_TOKEN_URL = settings.api_ai_go_token_url
@@ -98,3 +119,6 @@ FIRECRAWL_API_KEY = settings.firecrawl_api_key
 SCRAPINGBEE_API_KEY = settings.scrapingbee_api_key
 RSS_FEEDS = settings.rss_feeds
 GOOGLE_ALERTS_RSS = settings.google_alerts_rss
+NEWS_COLLECTION_WORKERS = max(1, settings.news_collection_workers)
+NEWS_CLASSIFIER_MAX_CHARS = max(1000, settings.news_classifier_max_chars)
+AI_REQUEST_TIMEOUT_SECONDS = max(5, settings.ai_request_timeout_seconds)

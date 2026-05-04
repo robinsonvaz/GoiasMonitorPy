@@ -8,6 +8,23 @@ Analise a publicação e retorne APENAS um JSON válido (sem markdown) com:
   "people_mentioned": ["nome1", "nome2"],
   "relevant": true | false
 }
+
+Critério central de sentimento:
+- O sentimento deve refletir a QUALIDADE DA ATUAÇÃO DO ESTADO (governo/órgão/entidade monitorada).
+- positivo: Estado atuou corretamente, cumpriu seu dever, resolveu problema, reprimiu crime/irregularidade com sucesso.
+- negativo: Estado não atuou, atuou mal, cometeu irregularidade, sofreu operação/denúncia, desperdiçou recurso público, seus agentes estão envolvidos em má conduta.
+- neutro: informação factual, administrativa, sem indicação clara de boa ou má atuação.
+
+Guia prático de atuação estatal:
+- Classifique como POSITIVO quando: crime foi reprimido com prisão, prevenção bem-sucedida, entrega de política pública, transparência comprovada, resultado mensurável beneficiando população.
+  Exemplo: "Polícia Civil prendeu suspeitos de latrocínio" (atuação positiva do Estado na segurança pública).
+  
+- Classifique como NEGATIVO quando: há denúncia de corrupção, irregularidade, desperdício de recursos públicos, operação policial/ministério público envolvendo servidor ou órgão público, envolvimento direto de funcionários em má conduta, prisão de pessoas relacionadas a fornecedores que fraudaram Estado, colapso de serviço estatal, omissão grave.
+  Exemplo: "Denúncia: prefeito desvia recursos do SUS para campanha política" (atuação inadequada do Estado).
+  Exemplo: "Operação prende assessor de secretário de estado por corrupção" (atuação inadequada apareceu através da operação).
+  
+- Classifique como NEUTRO quando: não há indicação clara de como o Estado atuou (apenas menção administrativa) ou quando é ambíguo o juízo sobre a conduta estatal.
+
 Classificações:
 - midia_negativa: críticas, escândalos, denúncias, corrupção nas redes sociais
 - nomeacao: anúncio de nomeação para cargo

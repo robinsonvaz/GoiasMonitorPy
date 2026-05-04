@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 from typing import Callable
 from typing import Any
 
@@ -15,16 +16,25 @@ from config import (
     API_AI_GO_ENDPOINT,
     API_AI_GO_MODEL,
     API_AI_GO_TOKEN_URL,
+    AI_REQUEST_TIMEOUT_SECONDS,
+    CEREBRAS_API_KEY,
+    CEREBRAS_MODEL,
     CLAUDE_API_KEY,
     CLAUDE_MODEL,
+    COHERE_API_KEY,
+    COHERE_MODEL,
     GOOGLE_API_KEY,
     GOOGLE_MODEL,
     GROQ_API_KEY,
     GROQ_MODEL,
+    HUGGINGFACE_API_KEY,
+    HUGGINGFACE_MODEL,
+    LOVABLE_API_KEY,
     MISTRAL_API_KEY,
     MISTRAL_MODEL,
     OPENAI_API_KEY,
     OPENAI_MODEL,
+    NEWS_CLASSIFIER_MAX_CHARS,
     XAI_API_KEY,
     XAI_MODEL,
 )
@@ -46,6 +56,9 @@ _RELATED_CONTENT_SPLIT_RE = re.compile(
     r"\bcontinue\s+lendo\b",
     flags=re.IGNORECASE,
 )
+
+_API_AI_GO_TOKEN_CACHE: str | None = None
+_API_AI_GO_TOKEN_EXPIRES_AT: float = 0.0
 
 
 def _is_org_like(value: str) -> bool:
@@ -198,7 +211,10 @@ def _normalize_mention(value: str) -> str:
     return cleaned
 
 
-def _sanitize_news_text(value: str, max_chars: int = 3000) -> str:
+def _sanitize_news_text(value: str, max_chars: int | None = None) -> str:
+    if max_chars is None:
+        max_chars = NEWS_CLASSIFIER_MAX_CHARS
+
     text = re.sub(r"\s+", " ", value or "").strip()
     if not text:
         return ""
@@ -207,6 +223,8 @@ def _sanitize_news_text(value: str, max_chars: int = 3000) -> str:
     if marker_match:
         text = text[:marker_match.start()].strip(" -:|\t\n\r")
 
+    if max_chars <= 0:
+        return text
     return text[:max_chars].strip()
 
 
@@ -325,6 +343,9 @@ def is_configured() -> bool:
             _is_usable_secret(XAI_API_KEY),
             _is_usable_secret(GROQ_API_KEY),
             _is_usable_secret(MISTRAL_API_KEY),
+            _is_usable_secret(HUGGINGFACE_API_KEY),
+            _is_usable_secret(COHERE_API_KEY),
+            _is_usable_secret(CEREBRAS_API_KEY),
             _is_usable_secret(API_AI_GO_CONSUMER_KEY) and _is_usable_secret(API_AI_GO_CONSUMER_SECRET),
         )
     )
@@ -362,7 +383,7 @@ def _request_google(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
             "generationConfig": {"temperature": 0.1},
         },
-        timeout=30,
+        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
     if not response.ok:
         return None
@@ -398,7 +419,7 @@ def _request_openai_compatible(
             ],
             "temperature": 0.1,
         },
-        timeout=30,
+        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
     if not response.ok:
         return None
@@ -424,7 +445,7 @@ def _request_claude(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_prompt}],
         },
-        timeout=30,
+        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
     if not response.ok:
         return None
@@ -434,7 +455,70 @@ def _request_claude(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
     return _extract_json_text(text)
 
 
+def _request_huggingface(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    return _request_openai_compatible(
+        "https://router.huggingface.co/v1/chat/completions",
+        HUGGINGFACE_API_KEY,
+        HUGGINGFACE_MODEL,
+        system_prompt,
+        user_prompt,
+    )
+
+
+def _request_cohere(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    if not _is_usable_secret(COHERE_API_KEY):
+        return None
+    response = requests.post(
+        "https://api.cohere.com/v2/chat",
+        headers={
+            "Authorization": f"Bearer {COHERE_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": COHERE_MODEL,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.1,
+        },
+        timeout=AI_REQUEST_TIMEOUT_SECONDS,
+    )
+    if not response.ok:
+        return None
+    data = response.json()
+
+    message = data.get("message") or {}
+    content = message.get("content")
+    text = ""
+    if isinstance(content, list):
+        text = "\n".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict)
+        )
+    elif isinstance(content, str):
+        text = content
+
+    if not text:
+        text = data.get("text") or data.get("output_text") or ""
+
+    return _extract_json_text(text)
+
+
+def _request_cerebras(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    return _request_openai_compatible(
+        "https://api.cerebras.ai/v1/chat/completions",
+        CEREBRAS_API_KEY,
+        CEREBRAS_MODEL,
+        system_prompt,
+        user_prompt,
+    )
+
+
 def _get_api_ai_go_token() -> str | None:
+    global _API_AI_GO_TOKEN_CACHE, _API_AI_GO_TOKEN_EXPIRES_AT
+
     if not (
         _is_usable_secret(API_AI_GO_CONSUMER_KEY)
         and _is_usable_secret(API_AI_GO_CONSUMER_SECRET)
@@ -442,6 +526,10 @@ def _get_api_ai_go_token() -> str | None:
         and API_AI_GO_ENDPOINT
     ):
         return None
+
+    now = time.monotonic()
+    if _API_AI_GO_TOKEN_CACHE and now < _API_AI_GO_TOKEN_EXPIRES_AT:
+        return _API_AI_GO_TOKEN_CACHE
 
     basic = base64.b64encode(
         f"{API_AI_GO_CONSUMER_KEY}:{API_AI_GO_CONSUMER_SECRET}".encode("utf-8")
@@ -453,12 +541,18 @@ def _get_api_ai_go_token() -> str | None:
             "Content-Type": "application/x-www-form-urlencoded",
         },
         data={"grant_type": "client_credentials"},
-        timeout=30,
+        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
     if not response.ok:
         return None
     data = response.json()
-    return data.get("access_token")
+    access_token = data.get("access_token")
+    expires_in = int(data.get("expires_in") or 0)
+    if access_token:
+        _API_AI_GO_TOKEN_CACHE = access_token
+        # Leave a small safety window to avoid using an about-to-expire token.
+        _API_AI_GO_TOKEN_EXPIRES_AT = now + max(0, expires_in - 30)
+    return access_token
 
 
 def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
@@ -479,7 +573,7 @@ def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] |
             ],
             "temperature": 0.1,
         },
-        timeout=30,
+        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
     if not response.ok:
         return None
@@ -490,6 +584,7 @@ def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] |
 
 def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
     providers: list[tuple[str, Callable[[], dict[str, Any] | None]]] = [
+        ("api_ai_go", lambda: _request_api_ai_go(system_prompt, user_prompt)),
         ("google", lambda: _request_google(system_prompt, user_prompt)),
         (
             "openai",
@@ -532,7 +627,9 @@ def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, 
                 user_prompt,
             ),
         ),
-        ("api_ai_go", lambda: _request_api_ai_go(system_prompt, user_prompt)),
+        ("huggingface", lambda: _request_huggingface(system_prompt, user_prompt)),
+        ("cohere", lambda: _request_cohere(system_prompt, user_prompt)),
+        ("cerebras", lambda: _request_cerebras(system_prompt, user_prompt)),
     ]
 
     for provider_name, provider_call in providers:
@@ -555,7 +652,7 @@ def _chat_completion_request(payload: dict[str, Any]) -> requests.Response:
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=30,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
         )
 
     if _is_usable_secret(OPENAI_API_KEY):
@@ -568,7 +665,7 @@ def _chat_completion_request(payload: dict[str, Any]) -> requests.Response:
                 "Content-Type": "application/json",
             },
             json=openai_payload,
-            timeout=30,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
         )
 
     raise RuntimeError("Nenhuma chave de IA válida configurada")
@@ -582,7 +679,7 @@ def classify_news(text_content: str, title: str, url: str, entity_name: str) -> 
     """
     truncated = _sanitize_news_text(text_content)
     if not truncated:
-        truncated = (title or "")[:3000]
+        truncated = (title or "")[:NEWS_CLASSIFIER_MAX_CHARS]
 
     with open("prompts/news_classifier.txt", encoding="utf-8") as f:
         system_prompt = f.read().replace("{{entity_name}}", entity_name)

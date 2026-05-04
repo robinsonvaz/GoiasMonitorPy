@@ -95,8 +95,14 @@ CREATE TABLE news_items (
   entity_id CHAR(36) NULL,
   title TEXT NOT NULL,
   content TEXT NULL,
+    full_text LONGTEXT NULL,
+  full_content LONGTEXT NULL,
   source_url TEXT NULL,
+    source_url_norm VARCHAR(1200) NULL,
   source_name VARCHAR(255) NULL,
+    title_norm VARCHAR(600) NULL,
+    content_hash CHAR(64) NULL,
+    dedup_key CHAR(64) NULL,
   classification ENUM('midia_negativa','nomeacao','exoneracao','substituicao','troca','movimentacao','acao_judicial','outro') NOT NULL DEFAULT 'outro',
   sentiment ENUM('positivo','negativo','neutro') NOT NULL DEFAULT 'neutro',
   people_mentioned JSON NULL,
@@ -107,6 +113,8 @@ CREATE TABLE news_items (
   INDEX idx_news_items_sentiment (sentiment),
   INDEX idx_news_items_classification (classification),
   INDEX idx_news_items_collected (collected_at),
+    INDEX idx_news_items_source_url_norm (source_url_norm(255)),
+    INDEX idx_news_items_dedup_key (dedup_key),
   CONSTRAINT fk_news_entity FOREIGN KEY (entity_id) REFERENCES monitored_entities(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

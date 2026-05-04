@@ -201,6 +201,46 @@ $env:PYTHONPATH='.'
 .\.venv\Scripts\python.exe scripts/reprocess_mentions.py
 ```
 
+## Revalidacao de relevancia (falsos positivos)
+
+Para revalidar noticias antigas com o filtro estrito (contexto de Goias + variacoes da entidade):
+
+```powershell
+$env:PYTHONPATH='.'
+.\.venv\Scripts\python.exe scripts/revalidate_news_relevance.py --action report --print-false-positives
+```
+
+Executar em modo aplicacao (desassociar):
+
+```powershell
+$env:PYTHONPATH='.'
+.\.venv\Scripts\python.exe scripts/revalidate_news_relevance.py --action detach --apply --fetch-missing-full-text
+```
+
+Executar em modo aplicacao (remover):
+
+```powershell
+$env:PYTHONPATH='.'
+.\.venv\Scripts\python.exe scripts/revalidate_news_relevance.py --action delete --apply --fetch-missing-full-text
+```
+
+Revalidar apenas uma noticia especifica:
+
+```powershell
+$env:PYTHONPATH='.'
+.\.venv\Scripts\python.exe scripts/revalidate_news_relevance.py --news-id 76c987ac-f5e3-4ad5-837f-d682ef6ee439 --action report --print-false-positives
+```
+
+## Reclassificação de sentimento
+
+Depois de ajustar os prompts em `prompts/news_classifier.txt` ou `prompts/social_classifier.txt`, execute o script abaixo para reclassificar **todas** as notícias já capturadas com o novo critério:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/reclassify_fast.py
+```
+
+O script usa a cadeia de fallback de IA configurada no `.env` e exibe o progresso linha a linha. Ao final mostra a distribuição de sentimentos (positivo / negativo / neutro) resultante.
+
 ## Banco de dados
 
 - O schema essencial é garantido automaticamente no startup via `ensure_local_schema()`.
