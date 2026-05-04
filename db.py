@@ -204,173 +204,21 @@ def ensure_local_schema() -> None:
                     err = str(exc).lower()
                     if "duplicate column" not in err and "duplicate key name" not in err:
                         raise
-        conn.commit()
 
-
-
-def _connect(db: str | None = None):
-    return pymysql.connect(
-        host=MYSQL_HOST,
-        port=MYSQL_PORT,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=db,
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=False,
-    )
-
-
-@contextmanager
-def get_conn():
-    conn = _connect(MYSQL_DATABASE)
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
-
-
-def query_all(sql: str, params: tuple | list | None = None):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params or ())
-            return cur.fetchall()
-
-
-def query_one(sql: str, params: tuple | list | None = None):
-    rows = query_all(sql, params)
-    return rows[0] if rows else None
-
-
-def execute(sql: str, params: tuple | list | None = None):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params or ())
-            return cur.rowcount
-
-
-def execute_many(sql: str, params_list: list[tuple] | list[list]):
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.executemany(sql, params_list)
-            return cur.rowcount
-
-
-def parse_json_list(value):
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    if isinstance(value, str):
-        value = value.strip()
-        if not value:
-            return []
-        try:
-            parsed = json.loads(value)
-            return parsed if isinstance(parsed, list) else []
-        except json.JSONDecodeError:
-            return []
-    return []
-
-
-def ensure_local_schema() -> None:
-    with _connect(None) as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{MYSQL_DATABASE}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-        conn.commit()
-
-    with get_conn() as conn:
-        with conn.cursor() as cur:
+            # Scheduling table for automated collection runs.
             cur.execute(
                 """
-                CREATE TABLE IF NOT EXISTS users (
+                CREATE TABLE IF NOT EXISTS collection_schedules (
                     id CHAR(36) NOT NULL PRIMARY KEY,
-                    email VARCHAR(255) NOT NULL UNIQUE,
-                    full_name VARCHAR(255) NULL,
-                    password_hash VARCHAR(255) NOT NULL,
-                    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+                    name VARCHAR(255) NOT NULL,
+                    entity_ids JSON NOT NULL,
+                    times JSON NOT NULL,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    created_by CHAR(36) NOT NULL,
+                    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+                    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+        conn.commit()
 
-            cur.execute("SELECT COUNT(*) AS total FROM users")
-            total = cur.fetchone()["total"]
-            if total == 0:
-                admin_id = str(uuid.uuid4())
-                cur.execute(
-                    """
-                    INSERT INTO users (id, email, full_name, password_hash)
-                    VALUES (%s, %s, %s, %s)
-                    """,
-                    (
-                        admin_id,
-                        LOCAL_ADMIN_EMAIL.strip().lower(),
-                        LOCAL_ADMIN_NAME.strip(),
-                        generate_password_hash(LOCAL_ADMIN_PASSWORD),
-                    ),
-                )
-
-                cur.execute(
-                    """
-                    INSERT INTO profiles (id, user_id, full_name, avatar_url, created_at, updated_at)
-                    VALUES (%s, %s, %s, NULL, NOW(6), NOW(6))
-                    """,
-                    (str(uuid.uuid4()), admin_id, LOCAL_ADMIN_NAME.strip()),
-                )
-
-            # Keep entity schema in sync for RSS-by-entity support.
-            try:
-                cur.execute(
-                    """
-                    ALTER TABLE monitored_entities
-                    ADD COLUMN google_alert_rss_url VARCHAR(1024) NULL
-                    """
-                )
-            except Exception as exc:
-                # Duplicate column errors are expected after first migration.
-                if "duplicate column" not in str(exc).lower():
-                    raise
-
-            # Keep news schema in sync for full article archival.
-            try:
-                cur.execute(
-                    """
-                    ALTER TABLE news_items
-                    ADD COLUMN full_text LONGTEXT NULL
-                    """
-                )
-            except Exception as exc:
-                if "duplicate column" not in str(exc).lower():
-                    raise
-
-            # Keep news schema in sync for full article storage (embedding-ready).
-            try:
-                cur.execute(
-                    """
-                    ALTER TABLE news_items
-                    ADD COLUMN full_content LONGTEXT NULL
-                    """
-                )
-            except Exception as exc:
-                if "duplicate column" not in str(exc).lower():
-                    raise
-
-            # Keep news schema in sync for dedup metadata.
-            for statement in (
-                "ALTER TABLE news_items ADD COLUMN source_url_norm VARCHAR(1200) NULL",
-                "ALTER TABLE news_items ADD COLUMN title_norm VARCHAR(600) NULL",
-                "ALTER TABLE news_items ADD COLUMN content_hash CHAR(64) NULL",
-                "ALTER TABLE news_items ADD COLUMN dedup_key CHAR(64) NULL",
-                "CREATE INDEX idx_news_items_source_url_norm ON news_items (source_url_norm(255))",
-                "CREATE INDEX idx_news_items_dedup_key ON news_items (dedup_key)",
-            ):
-                try:
-                    cur.execute(statement)
-                except Exception as exc:
-                    err = str(exc).lower()
-                    if "duplicate column" not in err and "duplicate key name" not in err:
-                        raise

@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated, Any, Callable
 
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -17,11 +21,80 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from config import settings
 from db import ensure_local_schema, parse_json_list, query_all, query_one, execute
 
+_log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Scheduler
+# ---------------------------------------------------------------------------
+
+_scheduler = BackgroundScheduler(timezone="America/Sao_Paulo")
+
+
+def _run_schedule_job(schedule_id: str) -> None:
+    """Background job: run news collection for a saved schedule."""
+    from agents import news_collector  # noqa: PLC0415
+
+    row = query_one(
+        "SELECT * FROM collection_schedules WHERE id = %s AND is_active = 1",
+        (schedule_id,),
+    )
+    if not row:
+        return
+    entity_ids: list[str] = parse_json_list(row.get("entity_ids"))
+    user_id: str = str(row.get("created_by") or "")
+    _log.info("[Scheduler] Running schedule '%s' (id=%s)", row.get("name"), schedule_id)
+    if not entity_ids or entity_ids == ["all"]:
+        news_collector.run(entity_id=None, user_id=user_id)
+    else:
+        for eid in entity_ids:
+            news_collector.run(entity_id=eid, user_id=user_id)
+
+
+def reload_scheduler() -> None:
+    """Remove all scheduled jobs and re-register from DB (call after any CRUD)."""
+    _scheduler.remove_all_jobs()
+    active_schedules: list[dict[str, Any]] = query_all(
+        "SELECT * FROM collection_schedules WHERE is_active = 1"
+    )
+    for sched in active_schedules:
+        times: list[str] = parse_json_list(sched.get("times"))
+        for t in times:
+            try:
+                hour_str, minute_str = t.split(":")
+                job_id = f"sched_{sched['id']}_{hour_str}{minute_str}"
+                _scheduler.add_job(
+                    _run_schedule_job,
+                    trigger=CronTrigger(
+                        hour=int(hour_str),
+                        minute=int(minute_str),
+                        timezone="America/Sao_Paulo",
+                    ),
+                    args=[sched["id"]],
+                    id=job_id,
+                    replace_existing=True,
+                )
+                _log.info(
+                    "[Scheduler] Registered '%s' at %s",
+                    sched.get("name"), t,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("[Scheduler] Could not register job for schedule %s: %s", sched["id"], exc)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):  # type: ignore[type-arg]
+    ensure_local_schema()
+    reload_scheduler()
+    _scheduler.start()
+    yield
+    _scheduler.shutdown(wait=False)
+
+
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="GoiasMonitorPy")
+app = FastAPI(title="GoiasMonitorPy", lifespan=_lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.app_secret_key,
@@ -57,8 +130,6 @@ def _datetime_br(value: Any) -> str:
 
 
 templates.env.filters["datetime_br"] = _datetime_br
-
-ensure_local_schema()
 
 # ---------------------------------------------------------------------------
 # Auth helpers
@@ -536,6 +607,140 @@ async def settings_post(
         request, "settings.html",
         profile=profile, entities=entities, news_count=news_count, error=error, user=user,
     )
+
+
+# ---------------------------------------------------------------------------
+# Schedules
+# ---------------------------------------------------------------------------
+
+
+@app.get("/agendamentos", response_class=HTMLResponse, name="schedules")
+async def schedules_get(request: Request, user: UserDep) -> HTMLResponse:
+    all_schedules: list[dict[str, Any]] = query_all(
+        "SELECT * FROM collection_schedules ORDER BY name"
+    )
+    for s in all_schedules:
+        s["entity_ids"] = parse_json_list(s.get("entity_ids"))
+        s["times"] = parse_json_list(s.get("times"))
+        # Remove non-JSON-serializable fields (used only by tojson in template)
+        s.pop("created_at", None)
+        s.pop("updated_at", None)
+
+    all_entities: list[dict[str, Any]] = query_all(
+        "SELECT id, name FROM monitored_entities WHERE is_active = 1 ORDER BY name"
+    )
+    return _render(
+        request,
+        "schedules.html",
+        schedules=all_schedules,
+        entities=all_entities,
+        error=None,
+        user=user,
+    )
+
+
+@app.post("/agendamentos", response_class=HTMLResponse)
+async def schedules_post(
+    request: Request,
+    user: UserDep,
+    action: Annotated[str, Form()] = "create",
+    schedule_id: Annotated[str, Form()] = "",
+    name: Annotated[str, Form()] = "",
+    entity_ids: Annotated[list[str], Form()] = [],
+    times: Annotated[str, Form()] = "",
+    is_active: Annotated[str, Form()] = "",
+) -> Response:
+    error: str | None = None
+    try:
+        if action == "delete":
+            execute(
+                "DELETE FROM collection_schedules WHERE id = %s AND created_by = %s",
+                (schedule_id, user["id"]),
+            )
+            reload_scheduler()
+            _flash(request, "Agendamento removido.", "success")
+        elif action == "toggle":
+            execute(
+                "UPDATE collection_schedules SET is_active = %s, updated_at = NOW(6) WHERE id = %s",
+                (1 if is_active == "true" else 0, schedule_id),
+            )
+            reload_scheduler()
+        elif action == "edit":
+            times_list = [t.strip() for t in times.split(",") if t.strip()]
+            entities_json = json.dumps(entity_ids or ["all"], ensure_ascii=False)
+            execute(
+                "UPDATE collection_schedules SET name=%s, entity_ids=%s, times=%s, updated_at=NOW(6)"
+                " WHERE id=%s",
+                (name.strip(), entities_json, json.dumps(times_list, ensure_ascii=False), schedule_id),
+            )
+            reload_scheduler()
+            _flash(request, "Agendamento atualizado.", "success")
+        else:
+            if not name.strip():
+                raise ValueError("Informe um nome para o agendamento")
+            times_list = [t.strip() for t in times.split(",") if t.strip()]
+            if not times_list:
+                raise ValueError("Informe ao menos um horário")
+            entities_json = json.dumps(entity_ids or ["all"], ensure_ascii=False)
+            execute(
+                "INSERT INTO collection_schedules"
+                " (id, name, entity_ids, times, is_active, created_by, created_at, updated_at)"
+                " VALUES (%s, %s, %s, %s, 1, %s, NOW(6), NOW(6))",
+                (
+                    str(uuid.uuid4()),
+                    name.strip(),
+                    entities_json,
+                    json.dumps(times_list, ensure_ascii=False),
+                    user["id"],
+                ),
+            )
+            reload_scheduler()
+            _flash(request, "Agendamento criado.", "success")
+    except Exception as exc:
+        error = str(exc)
+
+    if error:
+        all_schedules: list[dict[str, Any]] = query_all(
+            "SELECT * FROM collection_schedules ORDER BY name"
+        )
+        for s in all_schedules:
+            s["entity_ids"] = parse_json_list(s.get("entity_ids"))
+            s["times"] = parse_json_list(s.get("times"))
+        all_entities: list[dict[str, Any]] = query_all(
+            "SELECT id, name FROM monitored_entities WHERE is_active = 1 ORDER BY name"
+        )
+        return _render(
+            request,
+            "schedules.html",
+            schedules=all_schedules,
+            entities=all_entities,
+            error=error,
+            user=user,
+        )
+
+    return RedirectResponse(url="/agendamentos", status_code=303)
+
+
+@app.post("/api/agendamentos/{schedule_id}/executar", name="api_run_schedule")
+async def api_run_schedule(
+    request: Request,
+    schedule_id: str,
+    user: UserDep,
+) -> JSONResponse:
+    """Manually trigger a schedule immediately."""
+    import threading  # noqa: PLC0415
+
+    row = query_one("SELECT * FROM collection_schedules WHERE id = %s", (schedule_id,))
+    if not row:
+        return JSONResponse({"success": False, "error": "Agendamento não encontrado"}, status_code=404)
+
+    threading.Thread(target=_run_schedule_job, args=(schedule_id,), daemon=True).start()
+    headers = {
+        "HX-Trigger": json.dumps(
+            {"showToast": {"message": f"Coleta '{row['name']}' iniciada.", "type": "success"}}
+        )
+    }
+    return JSONResponse({"success": True}, headers=headers)
 
 
 # ---------------------------------------------------------------------------
