@@ -11,10 +11,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
+from html.parser import HTMLParser
 import re
 from typing import List
 import time
 import unicodedata
+from urllib.parse import parse_qs, urljoin, urlparse
 import requests
 
 import feedparser
@@ -78,6 +80,205 @@ _GOIAS_CONTEXT_MARKERS = (
     "estado de goias",
     "alego",
 )
+_LOCAL_PORTAL_SOURCES = (
+    {
+        "name": "Jornal Opção",
+        "feed_urls": ("https://www.jornalopcao.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("jornalopcao.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Diário de Goiás",
+        "feed_urls": ("https://diariodegoias.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("diariodegoias.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Diário da Manhã",
+        "feed_urls": ("https://www.dm.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("dm.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "O Hoje",
+        "feed_urls": ("https://ohoje.com/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("ohoje.com",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Portal 6",
+        "feed_urls": ("https://portal6.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("portal6.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Goiás 24 Horas",
+        "feed_urls": ("https://goias24horas.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("goias24horas.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Opinião Goiás",
+        "feed_urls": ("https://opiniaogoias.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("opiniaogoias.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "A Redação",
+        "feed_urls": ("https://www.aredacao.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("aredacao.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Diário do Estado",
+        "feed_urls": ("https://diariodoestadogo.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("diariodoestadogo.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Mais Goiás",
+        "feed_urls": ("https://www.maisgoias.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("maisgoias.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Dia Online",
+        "feed_urls": ("https://diaonline.ig.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("diaonline.ig.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Sagres Online",
+        "feed_urls": ("https://sagresonline.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("sagresonline.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Folha Z",
+        "feed_urls": ("https://folhaz.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("folhaz.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Oeste Goiano",
+        "feed_urls": ("https://oestegoiano.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("oestegoiano.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Tribuna do Planalto",
+        "feed_urls": ("https://tribunadoplanalto.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("tribunadoplanalto.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Zap Catalão",
+        "feed_urls": ("https://www.zapcatalao.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("zapcatalao.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Revista Bula",
+        "feed_urls": ("https://www.revistabula.com/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("revistabula.com",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Agência Goiás de Notícias",
+        "feed_urls": ("https://goias.gov.br/categoria/noticias/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("goias.gov.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "Jornal Visão",
+        "feed_urls": ("https://jornalvisao.com.br/feed/",),
+        "listing_urls": (),
+        "allowed_hosts": ("jornalvisao.com.br",),
+        "article_patterns": (),
+    },
+    {
+        "name": "O Popular",
+        "feed_urls": (),
+        "listing_urls": (
+            "https://opopular.com.br/ultimas",
+            "https://opopular.com.br/politica",
+            "https://opopular.com.br/cidades",
+            "https://opopular.com.br/economia",
+        ),
+        "allowed_hosts": ("opopular.com.br",),
+        "article_patterns": (r"^/.+?/.+-\d+\.\d+$",),
+    },
+)
+_LOCAL_PORTAL_HOSTS = {
+    host
+    for source in _LOCAL_PORTAL_SOURCES
+    for host in source["allowed_hosts"]
+}
+_LOCAL_PORTAL_BLOCKED_PATH_TOKENS = (
+    "/anuncie",
+    "/autor",
+    "/author",
+    "/categoria",
+    "/contato",
+    "/expediente",
+    "/feed",
+    "/fale-conosco",
+    "/politica-de-privacidade",
+    "/termos",
+)
+
+
+class _AnchorTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[tuple[str, str]] = []
+        self._current_href: str | None = None
+        self._current_text_chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a":
+            return
+        href = ""
+        for attr_name, attr_value in attrs:
+            if attr_name.lower() == "href" and attr_value:
+                href = attr_value.strip()
+                break
+        if not href:
+            return
+        self._current_href = href
+        self._current_text_chunks = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_href is None or not data:
+            return
+        self._current_text_chunks.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() != "a" or self._current_href is None:
+            return
+        text = _sanitize_title(" ".join(self._current_text_chunks))
+        if text:
+            self.links.append((self._current_href, text))
+        self._current_href = None
+        self._current_text_chunks = []
 
 
 def _make_result(
@@ -85,9 +286,41 @@ def _make_result(
     title: str,
     description: str = "",
     published_at: datetime | None = None,
+    source_type: str = "",
 ) -> SearchResult:
     cleaned_title = _sanitize_title(title)
-    return SearchResult(url=url, title=cleaned_title, description=description, published_at=published_at)
+    return SearchResult(url=url, title=cleaned_title, description=description, published_at=published_at, source_type=source_type)
+
+
+def _normalize_host(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower().strip()
+    if host.startswith("www."):
+        return host[4:]
+    return host
+
+
+def _unwrap_google_redirect_url(url: str) -> str:
+    value = (url or "").strip()
+    if not value:
+        return ""
+
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    if host != "google.com" or parsed.path != "/url":
+        return value
+
+    query = parse_qs(parsed.query)
+    for key in ("url", "q"):
+        candidate = (query.get(key) or [""])[0].strip()
+        candidate_parsed = urlparse(candidate)
+        if candidate_parsed.scheme in {"http", "https"} and candidate_parsed.netloc:
+            return candidate
+
+    return value
+
+
+def is_local_portal_url(url: str) -> bool:
+    return _normalize_host(url) in _LOCAL_PORTAL_HOSTS
 
 
 def _sanitize_title(value: str) -> str:
@@ -338,6 +571,137 @@ def _matches_entity_tags(title: str, summary: str, tags: List[str] | None) -> bo
     return False
 
 
+def _is_scrapable_local_article(url: str, source: dict) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if _normalize_host(url) not in source["allowed_hosts"]:
+        return False
+
+    path = (parsed.path or "").strip().rstrip("/")
+    lower_path = path.lower()
+    if not lower_path or lower_path == "/":
+        return False
+
+    if any(token in lower_path for token in _LOCAL_PORTAL_BLOCKED_PATH_TOKENS):
+        return False
+    if lower_path.endswith((".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".xml", ".pdf")):
+        return False
+
+    listing_paths = {
+        urlparse(listing_url).path.rstrip("/").lower()
+        for listing_url in source.get("listing_urls", ())
+    }
+    if lower_path in listing_paths:
+        return False
+
+    for pattern in source.get("article_patterns", ()): 
+        if re.search(pattern, lower_path):
+            return True
+    return False
+
+
+def _scrape_local_listing_entries(
+    source: dict,
+    filter_terms: List[str],
+    limit: int,
+) -> List[SearchResult]:
+    results: List[SearchResult] = []
+    seen: set[str] = set()
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
+    }
+
+    for listing_url in source.get("listing_urls", ()):
+        try:
+            response = requests.get(listing_url, headers=headers, timeout=20)
+            response.raise_for_status()
+        except Exception:
+            continue
+
+        parser = _AnchorTextExtractor()
+        parser.feed(response.text[:400000])
+        for href, anchor_text in parser.links:
+            absolute_url = urljoin(listing_url, href)
+            normalized_url = absolute_url.strip()
+            if not normalized_url or normalized_url in seen:
+                continue
+            if not _is_scrapable_local_article(normalized_url, source):
+                continue
+
+            title = _sanitize_title(anchor_text)
+            if len(title) < 12:
+                continue
+            if not _matches_filter_terms(title, "", filter_terms):
+                continue
+
+            seen.add(normalized_url)
+            results.append(_make_result(normalized_url, title, source_type="local_portal"))
+            if len(results) >= limit:
+                return results
+        time.sleep(0.2)
+
+    return results
+
+
+def _collect_local_portal_entries(
+    filter_terms: List[str],
+    tag_terms: List[str],
+    strict_entity_terms: List[str],
+    limit: int,
+) -> List[SearchResult]:
+    source_groups: list[List[SearchResult]] = []
+    per_source_limit = max(1, min(3, limit))
+
+    for source in _LOCAL_PORTAL_SOURCES:
+        source_results = fetch_rss_entries(
+            list(source.get("feed_urls", ())),
+            filter_terms=filter_terms,
+            tag_terms=tag_terms,
+            strict_entity_terms=strict_entity_terms,
+            require_goias_context=True,
+            limit=per_source_limit,
+            source_type="local_portal",
+        )
+        if len(source_results) < min(2, per_source_limit) and source.get("listing_urls"):
+            scraped_results = _scrape_local_listing_entries(source, filter_terms, per_source_limit)
+            source_results = _merge_unique_results(source_results, scraped_results, limit=per_source_limit)
+
+        if source_results:
+            source_groups.append(source_results)
+
+    return _merge_unique_results_round_robin(*source_groups, limit=limit)
+
+
+def _hydrate_candidate_hits(
+    results: List[SearchResult],
+    strict_entity_terms: List[str],
+    limit: int,
+) -> List[SearchResult]:
+    hydrated_hits: List[SearchResult] = []
+
+    for item in results:
+        article_text = item.markdown or extract_article_text(item.url, summary_mode=False) or ""
+        summary = _clean_candidate_text(article_text or item.description or item.title, max_sentences=3, max_chars=700)
+        if article_text:
+            item.markdown = article_text
+        item.description = summary or _clean_candidate_text(item.description, max_sentences=3, max_chars=600)
+
+        relevance_blob = article_text or item.description or item.title
+        if not is_relevant_for_goias_entity(item.title, item.description, relevance_blob, strict_entity_terms):
+            continue
+
+        hydrated_hits.append(item)
+        if len(hydrated_hits) >= limit:
+            break
+
+    return hydrated_hits
+
+
 def fetch_rss_entries(
     feed_urls: List[str],
     filter_terms: List[str] | None = None,
@@ -345,6 +709,7 @@ def fetch_rss_entries(
     tag_terms: List[str] | None = None,
     strict_entity_terms: List[str] | None = None,
     require_goias_context: bool = False,
+    source_type: str = "",
 ) -> List[SearchResult]:
     """Fetch and filter entries from a list of RSS/Atom URLs.
 
@@ -363,7 +728,7 @@ def fetch_rss_entries(
 
         entries = getattr(parsed, "entries", []) or []
         for e in entries:
-            link = (e.get("link") or "").strip()
+            link = _unwrap_google_redirect_url((e.get("link") or "").strip())
             if not link or link in seen:
                 continue
             title = _sanitize_title((e.get("title") or "").strip())
@@ -386,7 +751,7 @@ def fetch_rss_entries(
                 summary = _clean_candidate_text(full_text, max_sentences=3, max_chars=700)
 
             seen.add(link)
-            item = _make_result(link, title or link, summary, published_at=_rss_entry_published_at(e))
+            item = _make_result(link, title or link, summary, published_at=_rss_entry_published_at(e), source_type=source_type)
             if full_text:
                 item.markdown = full_text
             results.append(item)
@@ -445,11 +810,33 @@ def _merge_unique_results(*groups: List[SearchResult], limit: int) -> List[Searc
     return results
 
 
-def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]:
-    """Collect candidate articles for an entity using prioritized free sources.
+def _merge_unique_results_round_robin(*groups: List[SearchResult], limit: int) -> List[SearchResult]:
+    results: List[SearchResult] = []
+    seen: set[str] = set()
+    group_lists = [group for group in groups if group]
+    indexes = [0] * len(group_lists)
 
-    Order: configured RSS feeds -> Google Alerts RSS -> fall back to nothing (search handled elsewhere)
-    """
+    while len(results) < limit and group_lists:
+        progressed = False
+        for group_index, group in enumerate(group_lists):
+            while indexes[group_index] < len(group):
+                item = group[indexes[group_index]]
+                indexes[group_index] += 1
+                if not item.url or item.url in seen:
+                    continue
+                seen.add(item.url)
+                results.append(item)
+                progressed = True
+                break
+            if len(results) >= limit:
+                return results
+        if not progressed:
+            break
+
+    return results
+
+
+def _entity_terms(entity: dict) -> tuple[str, list[str], list[str], list[str]]:
     name = (entity.get("name") or "").strip()
     keywords = []
     try:
@@ -466,12 +853,41 @@ def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]
     terms = [name] + keywords
     terms = [t for t in terms if t]
     strict_entity_terms = terms[:]
+    tag_terms = keywords if keywords else ([name] if name else [])
+    return name, keywords, terms, strict_entity_terms if strict_entity_terms else tag_terms
+
+
+def collect_local_portals_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]:
+    """Collect local Goiás portal candidates for an entity.
+
+    This is the primary and mandatory capture source in the news pipeline.
+    """
+    _name, _keywords, terms, strict_entity_terms = _entity_terms(entity)
+    if not terms:
+        return []
+
+    local_portal_hits = _collect_local_portal_entries(
+        filter_terms=terms,
+        tag_terms=terms,
+        strict_entity_terms=strict_entity_terms,
+        limit=max_results,
+    )
+    if not local_portal_hits:
+        return []
+    return _hydrate_candidate_hits(local_portal_hits, strict_entity_terms, max_results)
+
+
+def collect_alerts_and_feeds_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]:
+    """Collect entity/global alerts and manual RSS feeds as complementary sources."""
+    name, _keywords, terms, strict_entity_terms = _entity_terms(entity)
+    if not terms:
+        return []
 
     entity_google_alert_feed = (entity.get("google_alert_rss_url") or "").strip()
     entity_google_alert_feeds = [entity_google_alert_feed] if entity_google_alert_feed else []
 
-    # 1) Google Alerts are validated using entity tags (keywords) first.
-    tag_terms = keywords if keywords else [name]
+    # Google Alerts are validated using entity tags first.
+    tag_terms = terms if terms else [name]
     entity_ga_hits = fetch_rss_entries(
         entity_google_alert_feeds,
         filter_terms=terms,
@@ -479,6 +895,7 @@ def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]
         strict_entity_terms=strict_entity_terms,
         require_goias_context=True,
         limit=max_results,
+        source_type="google_alert_entity",
     )
     ga_hits = fetch_rss_entries(
         GOOGLE_ALERTS_RSS,
@@ -487,6 +904,7 @@ def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]
         strict_entity_terms=strict_entity_terms,
         require_goias_context=True,
         limit=max_results,
+        source_type="google_alert_global",
     )
     rss_hits = fetch_rss_entries(
         RSS_FEEDS,
@@ -495,17 +913,36 @@ def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]
         strict_entity_terms=strict_entity_terms,
         require_goias_context=True,
         limit=max_results,
+        source_type="rss_manual",
     )
-    merged_hits = _merge_unique_results(entity_ga_hits, ga_hits, rss_hits, limit=max_results)
-    if merged_hits:
-        for item in merged_hits:
-            article_text = item.markdown or extract_article_text(item.url, summary_mode=False)
-            if article_text:
-                item.markdown = article_text
-                item.description = _clean_candidate_text(article_text, max_sentences=3, max_chars=700)
-            else:
-                item.description = _clean_candidate_text(item.description, max_sentences=3, max_chars=600)
-        return merged_hits
 
-    # 3) Nothing found here — return empty list so caller can run search fallbacks
+    merged_hits = _merge_unique_results_round_robin(
+        entity_ga_hits,
+        ga_hits,
+        rss_hits,
+        limit=max_results,
+    )
+    if merged_hits:
+        return _hydrate_candidate_hits(merged_hits, strict_entity_terms, max_results)
+
+    return []
+
+
+def collect_for_entity(entity: dict, max_results: int = 8) -> List[SearchResult]:
+    """Backward-compatible aggregate collector.
+
+    Preferred usage in orchestrators:
+    1) collect_local_portals_for_entity (mandatory)
+    2) collect_alerts_and_feeds_for_entity (complementary)
+    """
+    _name, _keywords, terms, strict_entity_terms = _entity_terms(entity)
+    if not terms:
+        return []
+
+    local_hits = collect_local_portals_for_entity(entity, max_results=max_results)
+    complementary_hits = collect_alerts_and_feeds_for_entity(entity, max_results=max_results)
+    merged_hits = _merge_unique_results_round_robin(local_hits, complementary_hits, limit=max_results)
+    if merged_hits:
+        return _hydrate_candidate_hits(merged_hits, strict_entity_terms, max_results)
+
     return []

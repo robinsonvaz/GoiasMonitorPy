@@ -75,6 +75,7 @@ class SearchResult:
     description: str = field(default="")
     markdown: str = field(default="")
     published_at: datetime | None = field(default=None)
+    source_type: str = field(default="")
 
 
 @dataclass

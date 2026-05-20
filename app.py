@@ -707,12 +707,24 @@ async def schedules_post(
             )
             reload_scheduler()
         elif action == "edit":
+            if not schedule_id.strip():
+                raise ValueError("Agendamento inválido para edição")
+            if not name.strip():
+                raise ValueError("Informe um nome para o agendamento")
             times_list = [t.strip() for t in times.split(",") if t.strip()]
+            if not times_list:
+                raise ValueError("Informe ao menos um horário")
+            owned_schedule = query_one(
+                "SELECT id FROM collection_schedules WHERE id = %s AND created_by = %s",
+                (schedule_id, user["id"]),
+            )
+            if not owned_schedule:
+                raise ValueError("Agendamento não encontrado ou sem permissão de edição")
             entities_json = json.dumps(entity_ids or ["all"], ensure_ascii=False)
             execute(
                 "UPDATE collection_schedules SET name=%s, entity_ids=%s, times=%s, updated_at=NOW(6)"
-                " WHERE id=%s",
-                (name.strip(), entities_json, json.dumps(times_list, ensure_ascii=False), schedule_id),
+                " WHERE id=%s AND created_by=%s",
+                (name.strip(), entities_json, json.dumps(times_list, ensure_ascii=False), schedule_id, user["id"]),
             )
             reload_scheduler()
             _flash(request, "Agendamento atualizado.", "success")

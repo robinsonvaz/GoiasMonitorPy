@@ -9,7 +9,7 @@
       <h1 class="page-title">Agendamentos</h1>
       <p class="page-subtitle">Automatize a coleta de notícias por entidade e horário</p>
     </div>
-    <button class="btn btn-primary btn-sm" onclick="document.getElementById('modal-new').style.display='flex'">
+    <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('modal-new').style.display='flex'">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       Novo Agendamento
     </button>
@@ -66,15 +66,16 @@
               </label>
             </form>
             <!-- Run now -->
-            <button class="btn-ghost btn-icon entity-action-btn" title="Executar agora"
+            <button type="button" class="btn-ghost btn-icon entity-action-btn" title="Executar agora"
               hx-post="/api/agendamentos/{{ s.id }}/executar"
               hx-swap="none">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             </button>
             <!-- Edit -->
-            <button class="btn-ghost btn-icon entity-action-btn entity-action-edit"
+            <button type="button" class="btn-ghost btn-icon entity-action-btn entity-action-edit"
               title="Editar"
-              onclick="openEditModal({{ s | tojson }})">
+              data-schedule="{{ s | tojson | forceescape }}"
+              onclick="openEditModalFromButton(this)">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             </button>
             <!-- Delete -->
@@ -99,7 +100,7 @@
   <div class="modal-box" onclick="event.stopPropagation()" style="max-width:520px">
     <div class="modal-header">
       <h2 class="modal-title">Novo Agendamento</h2>
-      <button class="btn-ghost btn-icon" onclick="document.getElementById('modal-new').style.display='none'">
+      <button type="button" class="btn-ghost btn-icon" onclick="document.getElementById('modal-new').style.display='none'">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -151,7 +152,7 @@
   <div class="modal-box" onclick="event.stopPropagation()" style="max-width:520px">
     <div class="modal-header">
       <h2 class="modal-title">Editar Agendamento</h2>
-      <button class="btn-ghost btn-icon" onclick="document.getElementById('modal-edit').style.display='none'">
+      <button type="button" class="btn-ghost btn-icon" onclick="document.getElementById('modal-edit').style.display='none'">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -251,6 +252,14 @@ function toggleAll(prefix) {
   var allChecked = cbs.every(function(cb) { return cb.checked; });
   cbs.forEach(function(cb) { cb.checked = !allChecked; cb.disabled = false; });
   document.getElementById(prefix + '-all').checked = false;
+}
+function openEditModalFromButton(button) {
+  var raw = button.getAttribute('data-schedule') || '{}';
+  try {
+    openEditModal(JSON.parse(raw));
+  } catch (err) {
+    console.error('Falha ao abrir modal de edição de agendamento:', err);
+  }
 }
 function openEditModal(s) {
   document.getElementById('edit-id').value = s.id;

@@ -4,6 +4,7 @@ Sistema de monitoramento de notícias sobre órgãos, entidades, pessoas e empre
 
 O projeto foi migrado para FastAPI e hoje inclui:
 - coleta web e social com estratégia híbrida (Google News + web aberta)
+- cobertura local embutida para portais goianos (RSS quando disponível, scraping quando necessário)
 - classificação por IA
 - painel com métricas e filtros
 - grafo de relacionamentos com destaque interativo por nível de conexão
@@ -142,12 +143,14 @@ Endpoints:
 - `POST /api/collect-news-social`
 
 Fluxo resumido:
-1. Busca em Google News (RSS e fallbacks)
-2. Expansão para web aberta quando necessário
-3. Classificação de relevância/sentimento/classificação por IA
-4. Enriquecimento de menções (pessoas/organizações/empresas)
-5. Persistência em `news_items`
-6. Geração de alertas para casos negativos
+1. Varredura obrigatória e prioritária de portais locais de Goiás (feeds nativos e páginas de listagem)
+2. Complemento com Google Alerts (entidade + globais) e RSS configurados no `.env`
+3. Busca em Google News (RSS e fallbacks) para expansão de cobertura
+4. Expansão para web aberta quando necessário
+5. Classificação de relevância/sentimento/classificação por IA
+6. Enriquecimento de menções (pessoas/organizações/empresas)
+7. Persistência em `news_items`
+8. Geração de alertas para casos negativos
 
 
 ## Google Alerts e Feeds RSS
@@ -186,6 +189,30 @@ GOOGLE_ALERTS_RSS=[
 ```
 
 Após adicionar as URLs, rode a coleta normalmente; o agente já tentará consumir `RSS_FEEDS` e `GOOGLE_ALERTS_RSS` antes de recorrer às buscas.
+
+Além dos feeds configurados no `.env`, a aplicação agora também faz cobertura local embutida dos principais portais goianos. A estratégia usa RSS quando o portal expõe feed estável e cai para scraping de páginas de listagem quando isso não existe ou não é confiável.
+
+Cobertura local embutida validada:
+- Jornal Opção
+- Diário de Goiás
+- Diário do Estado
+- Diário da Manhã
+- O Hoje
+- Portal 6
+- Goiás 24 Horas
+- Opinião Goiás
+- A Redação
+- Mais Goiás
+- Dia Online
+- Sagres Online
+- Folha Z
+- Oeste Goiano
+- Tribuna do Planalto
+- Zap Catalão
+- Revista Bula
+- Agência Goiás de Notícias (portal oficial)
+- Jornal Visão
+- O Popular, via scraping das páginas de editoria e últimas notícias
 
 Se quiser, eu posso:
 - ajudar a montar uma lista inicial de feeds goianos e verificar as URLs válidas

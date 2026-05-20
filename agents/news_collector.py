@@ -131,7 +131,13 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
 
     total_collected = 0
     fallback_classifications = 0
-    strategy_counts = {"rss_feeds": 0, "google_alerts": 0, "google_news": 0, "open_web": 0}
+    strategy_counts = {
+        "rss_feeds": 0,
+        "google_alerts": 0,
+        "local_portals": 0,
+        "google_news": 0,
+        "open_web": 0,
+    }
     extraction_cache: dict[str, tuple[str, datetime | None]] = {}
     cache_lock = threading.Lock()
 
@@ -158,25 +164,34 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         results: list[google_search.SearchResult] = []
         seen_urls: set[str] = set()
 
-        # Strategy 0: try configured RSS feeds and Google Alerts (RSS) first.
+        # Strategy 0 (mandatory): local Goiás portals are the primary capture mechanism.
         rss_started = time.perf_counter()
         try:
-            rss_results = fallbacks.collect_for_entity(entity, max_results=6)
-            for item in rss_results:
+            local_results = fallbacks.collect_local_portals_for_entity(entity, max_results=8)
+            for item in local_results:
                 if item.url in seen_urls:
                     continue
                 seen_urls.add(item.url)
                 results.append(item)
-            # Count hits by source type (best-effort): prefer rss_feeds when config present
-            if RSS_FEEDS := getattr(__import__("config"), "RSS_FEEDS"):
-                strategy_counts["rss_feeds"] += len(rss_results)
-            else:
-                strategy_counts["google_alerts"] += len(rss_results)
+            strategy_counts["local_portals"] += len(local_results)
+
+            # Strategy 1 (complementary): entity/global Google Alerts + configured RSS feeds.
+            feed_results = fallbacks.collect_alerts_and_feeds_for_entity(entity, max_results=6)
+            for item in feed_results:
+                if item.url in seen_urls:
+                    continue
+                seen_urls.add(item.url)
+                results.append(item)
+            for item in feed_results:
+                if item.source_type in ("google_alert_entity", "google_alert_global"):
+                    strategy_counts["google_alerts"] += 1
+                elif item.source_type == "rss_manual":
+                    strategy_counts["rss_feeds"] += 1
         except Exception as exc:
-            print(f"[RSS/Alerts] Error for {entity['name']}: {exc}")
+            print(f"[Local/Feeds] Error for {entity['name']}: {exc}")
         perf_metrics["rss_ms"] += (time.perf_counter() - rss_started) * 1000.0
 
-        # Strategy 1: prioritize Google News results if additional candidates needed.
+        # Strategy 2: prioritize Google News results if additional candidates needed.
         google_news_started = time.perf_counter()
         try:
             news_results = google_search.search_google_news(search_query, limit=5)
@@ -190,7 +205,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             print(f"[GoogleNews] Error for {entity['name']}: {exc}")
         perf_metrics["google_news_ms"] += (time.perf_counter() - google_news_started) * 1000.0
 
-        # Strategy 2 (fallback/expansion): if few *new* candidates remain.
+        # Strategy 3 (fallback/expansion): if few *new* candidates remain.
         existing_filter_started = time.perf_counter()
         current_urls = [normalize_url(r.url) for r in results if r.url]
         existing_after_news = _existing_url_set(current_urls)
@@ -377,6 +392,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
     msg = (
         "Busca concluída: "
         f"RSS/Alerts ({strategy_counts['rss_feeds']}) , "
+        f"Portais locais ({strategy_counts['local_portals']}) , "
         f"Google News ({strategy_counts['google_news']} resultados) e "
         f"Internet aberta ({strategy_counts['open_web']} resultados)."
     )
@@ -394,6 +410,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         "success": True,
         "collected": total_collected,
         "fallback_classifications": fallback_classifications,
+        "local_portal_results": strategy_counts["local_portals"],
         "google_news_results": strategy_counts["google_news"],
         "open_web_results": strategy_counts["open_web"],
         "message": msg,
