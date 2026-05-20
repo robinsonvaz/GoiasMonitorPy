@@ -10,6 +10,7 @@
         "h.source_type": true,
         "breakdown.get(st,": true,
         "f\\\"---": true,
-        "f\\\"": true
+        "f\\\"": true,
+        ".venv\\Scripts\\python.exe": true
     }
 }

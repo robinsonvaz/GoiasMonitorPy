@@ -100,6 +100,117 @@ run.bat
 
 A aplicação sobe em `http://127.0.0.1:8000` por padrão.
 
+## Execução em produção (Linux)
+
+### Pré-requisitos
+
+- Python 3.11
+- MySQL 8.x ou MariaDB 10.6+
+- Nginx
+- (opcional) Certbot / Let's Encrypt
+
+### 1. Criar usuário e diretório
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin goiasmonitor
+sudo mkdir -p /opt/goiasmonitor
+sudo chown goiasmonitor:goiasmonitor /opt/goiasmonitor
+```
+
+### 2. Clonar e configurar virtualenv
+
+```bash
+cd /opt/goiasmonitor
+git clone <repo_url> .
+python3.11 -m venv .venv
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install -r requirements.txt
+```
+
+### 3. Configurar variáveis de ambiente
+
+```bash
+cp .env.example .env
+# Edite .env com suas credenciais de produção
+nano .env
+```
+
+Gere uma chave secreta forte:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Cole o resultado em `APP_SECRET_KEY` no `.env`.
+
+### 4. (Opcional) Instalar navegadores Playwright
+
+```bash
+.venv/bin/python -m playwright install chromium --with-deps
+```
+
+### 5. Registrar serviço systemd
+
+```bash
+sudo cp deploy/goiasmonitor.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable goiasmonitor
+sudo systemctl start goiasmonitor
+sudo systemctl status goiasmonitor
+```
+
+Verificar logs:
+
+```bash
+sudo journalctl -u goiasmonitor -f
+```
+
+### 6. Configurar Nginx como reverse proxy
+
+```bash
+sudo cp deploy/nginx.conf /etc/nginx/sites-available/goiasmonitor
+# Edite o arquivo substituindo seudominio.com.br pelo domínio real
+sudo nano /etc/nginx/sites-available/goiasmonitor
+
+sudo ln -s /etc/nginx/sites-available/goiasmonitor \
+           /etc/nginx/sites-enabled/goiasmonitor
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 7. Configurar TLS (Let's Encrypt)
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d seudominio.com.br -d www.seudominio.com.br
+```
+
+### Ajuste fino do Gunicorn
+
+As configurações ficam em `gunicorn.conf.py`. Parâmetros overrideable por variáveis de ambiente:
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `GUNICORN_BIND` | `127.0.0.1:8000` | Endereço de escuta |
+| `GUNICORN_WORKERS` | `1` | Processos workers (manter 1 por causa do APScheduler embutido) |
+| `GUNICORN_TIMEOUT` | `120` | Timeout por requisição (segundos) |
+| `GUNICORN_LOG_LEVEL` | `info` | Nível de log (`debug`, `info`, `warning`, `error`) |
+
+> **Nota sobre workers:** O `APScheduler` roda dentro do processo da aplicação.
+> Com múltiplos workers, cada processo teria um scheduler independente, causando
+> execução duplicada dos agendamentos. Mantenha `GUNICORN_WORKERS=1` até migrar
+> o scheduler para um mecanismo externo (Celery Beat, Redis, etc.).
+
+### Estrutura dos artefatos de deploy
+
+```text
+deploy/
+├── goiasmonitor.service  # unidade systemd
+├── nginx.conf            # reverse proxy Nginx (referência)
+└── start-prod.sh         # script de inicialização manual
+gunicorn.conf.py          # configuração Gunicorn
+.env.example              # template de variáveis de produção
+```
+
 ## Instalação de dependências
 
 Ambiente de runtime:

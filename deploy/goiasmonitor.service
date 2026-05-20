@@ -1,0 +1,42 @@
+[Unit]
+Description=GoiasMonitorPy — FastAPI + Gunicorn
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=notify
+
+# ── Usuário e diretório ────────────────────────────────────────────────────
+User=goiasmonitor
+Group=goiasmonitor
+WorkingDirectory=/opt/goiasmonitor
+
+# ── Variáveis de ambiente ──────────────────────────────────────────────────
+# O arquivo .env é lido pelo pydantic-settings automaticamente;
+# o EnvironmentFile garante que as vars também fiquem disponíveis para o shell.
+EnvironmentFile=/opt/goiasmonitor/.env
+Environment="PYTHONPATH=/opt/goiasmonitor"
+Environment="PYTHONUNBUFFERED=1"
+
+# ── Comando de inicialização ───────────────────────────────────────────────
+ExecStart=/opt/goiasmonitor/.venv/bin/gunicorn \
+    -c /opt/goiasmonitor/gunicorn.conf.py \
+    app:app
+
+# ── Reinício automático ────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# ── Limites de recursos ────────────────────────────────────────────────────
+LimitNOFILE=65536
+
+# ── Segurança (hardening básico) ───────────────────────────────────────────
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/opt/goiasmonitor
+
+[Install]
+WantedBy=multi-user.target
