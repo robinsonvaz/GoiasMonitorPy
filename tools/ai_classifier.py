@@ -1,9 +1,10 @@
-"""AI classification tool — uses Lovable AI Gateway (OpenAI-compatible)."""
+"""AI classification tool with resilient multi-provider fallback."""
 from __future__ import annotations
 
 import base64
 import json
 import re
+import threading
 import time
 from typing import Callable
 from typing import Any
@@ -19,8 +20,6 @@ from config import (
     AI_REQUEST_TIMEOUT_SECONDS,
     CEREBRAS_API_KEY,
     CEREBRAS_MODEL,
-    CLAUDE_API_KEY,
-    CLAUDE_MODEL,
     COHERE_API_KEY,
     COHERE_MODEL,
     GOOGLE_API_KEY,
@@ -29,14 +28,10 @@ from config import (
     GROQ_MODEL,
     HUGGINGFACE_API_KEY,
     HUGGINGFACE_MODEL,
-    LOVABLE_API_KEY,
+    LLM_PROVIDER_COOLDOWN_SECONDS,
     MISTRAL_API_KEY,
     MISTRAL_MODEL,
-    OPENAI_API_KEY,
-    OPENAI_MODEL,
     NEWS_CLASSIFIER_MAX_CHARS,
-    XAI_API_KEY,
-    XAI_MODEL,
 )
 
 
@@ -59,6 +54,8 @@ _RELATED_CONTENT_SPLIT_RE = re.compile(
 
 _API_AI_GO_TOKEN_CACHE: str | None = None
 _API_AI_GO_TOKEN_EXPIRES_AT: float = 0.0
+_PROVIDER_BLOCKED_UNTIL: dict[str, float] = {}
+_PROVIDER_BLOCK_LOCK = threading.Lock()
 
 
 def _is_org_like(value: str) -> bool:
@@ -334,19 +331,90 @@ def _is_usable_secret(value: str) -> bool:
     return not any(lowered.startswith(prefix) for prefix in placeholders)
 
 
+def _is_provider_blocked(provider: str) -> bool:
+    with _PROVIDER_BLOCK_LOCK:
+        return time.monotonic() < _PROVIDER_BLOCKED_UNTIL.get(provider, 0.0)
+
+
+def _block_provider(provider: str, seconds: float) -> None:
+    if seconds <= 0:
+        return
+    with _PROVIDER_BLOCK_LOCK:
+        _PROVIDER_BLOCKED_UNTIL[provider] = max(
+            _PROVIDER_BLOCKED_UNTIL.get(provider, 0.0),
+            time.monotonic() + seconds,
+        )
+
+
+def _cooldown_from_response(response: requests.Response) -> float:
+    retry_after = (response.headers.get("Retry-After") or "").strip()
+    if retry_after.isdigit():
+        return float(retry_after)
+    return float(LLM_PROVIDER_COOLDOWN_SECONDS)
+
+
+def _post_json_with_cooldown(
+    provider: str,
+    url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> requests.Response | None:
+    if _is_provider_blocked(provider):
+        return None
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException:
+        _block_provider(provider, 20.0)
+        return None
+
+    if response.status_code in (403, 429):
+        _block_provider(provider, _cooldown_from_response(response))
+    if not response.ok:
+        return None
+    return response
+
+
+def _post_form_with_cooldown(
+    provider: str,
+    url: str,
+    headers: dict[str, str],
+    form_data: dict[str, Any],
+) -> requests.Response | None:
+    if _is_provider_blocked(provider):
+        return None
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            data=form_data,
+            timeout=AI_REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException:
+        _block_provider(provider, 20.0)
+        return None
+
+    if response.status_code in (403, 429):
+        _block_provider(provider, _cooldown_from_response(response))
+    if not response.ok:
+        return None
+    return response
+
+
 def is_configured() -> bool:
     return any(
         (
+            _is_usable_secret(API_AI_GO_CONSUMER_KEY) and _is_usable_secret(API_AI_GO_CONSUMER_SECRET),
             _is_usable_secret(GOOGLE_API_KEY),
-            _is_usable_secret(OPENAI_API_KEY),
-            _is_usable_secret(CLAUDE_API_KEY),
-            _is_usable_secret(XAI_API_KEY),
             _is_usable_secret(GROQ_API_KEY),
             _is_usable_secret(MISTRAL_API_KEY),
             _is_usable_secret(HUGGINGFACE_API_KEY),
             _is_usable_secret(COHERE_API_KEY),
             _is_usable_secret(CEREBRAS_API_KEY),
-            _is_usable_secret(API_AI_GO_CONSUMER_KEY) and _is_usable_secret(API_AI_GO_CONSUMER_SECRET),
         )
     )
 
@@ -375,17 +443,17 @@ def _build_user_prompt(title: str, url: str, truncated: str) -> str:
 def _request_google(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
     if not _is_usable_secret(GOOGLE_API_KEY):
         return None
-    response = requests.post(
+    response = _post_json_with_cooldown(
+        "google",
         f"https://generativelanguage.googleapis.com/v1beta/models/{GOOGLE_MODEL}:generateContent?key={GOOGLE_API_KEY}",
-        headers={"Content-Type": "application/json"},
-        json={
+        {"Content-Type": "application/json"},
+        {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
             "generationConfig": {"temperature": 0.1},
         },
-        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
-    if not response.ok:
+    if response is None:
         return None
     data = response.json()
     candidates = data.get("candidates") or []
@@ -397,6 +465,7 @@ def _request_google(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
 
 
 def _request_openai_compatible(
+    provider: str,
     endpoint: str,
     api_key: str,
     model: str,
@@ -405,13 +474,14 @@ def _request_openai_compatible(
 ) -> dict[str, Any] | None:
     if not _is_usable_secret(api_key):
         return None
-    response = requests.post(
+    response = _post_json_with_cooldown(
+        provider,
         endpoint,
-        headers={
+        {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
-        json={
+        {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -419,44 +489,17 @@ def _request_openai_compatible(
             ],
             "temperature": 0.1,
         },
-        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
-    if not response.ok:
+    if response is None:
         return None
     data = response.json()
     text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
     return _extract_json_text(text)
 
 
-def _request_claude(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
-    if not _is_usable_secret(CLAUDE_API_KEY):
-        return None
-    response = requests.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": CLAUDE_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
-            "model": CLAUDE_MODEL,
-            "max_tokens": 1200,
-            "temperature": 0.1,
-            "system": system_prompt,
-            "messages": [{"role": "user", "content": user_prompt}],
-        },
-        timeout=AI_REQUEST_TIMEOUT_SECONDS,
-    )
-    if not response.ok:
-        return None
-    data = response.json()
-    blocks = data.get("content") or []
-    text = "\n".join(block.get("text", "") for block in blocks if isinstance(block, dict))
-    return _extract_json_text(text)
-
-
 def _request_huggingface(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
     return _request_openai_compatible(
+        "huggingface",
         "https://router.huggingface.co/v1/chat/completions",
         HUGGINGFACE_API_KEY,
         HUGGINGFACE_MODEL,
@@ -468,13 +511,14 @@ def _request_huggingface(system_prompt: str, user_prompt: str) -> dict[str, Any]
 def _request_cohere(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
     if not _is_usable_secret(COHERE_API_KEY):
         return None
-    response = requests.post(
+    response = _post_json_with_cooldown(
+        "cohere",
         "https://api.cohere.com/v2/chat",
-        headers={
+        {
             "Authorization": f"Bearer {COHERE_API_KEY}",
             "Content-Type": "application/json",
         },
-        json={
+        {
             "model": COHERE_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -482,9 +526,8 @@ def _request_cohere(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
             ],
             "temperature": 0.1,
         },
-        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
-    if not response.ok:
+    if response is None:
         return None
     data = response.json()
 
@@ -508,6 +551,7 @@ def _request_cohere(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
 
 def _request_cerebras(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
     return _request_openai_compatible(
+        "cerebras",
         "https://api.cerebras.ai/v1/chat/completions",
         CEREBRAS_API_KEY,
         CEREBRAS_MODEL,
@@ -534,16 +578,16 @@ def _get_api_ai_go_token() -> str | None:
     basic = base64.b64encode(
         f"{API_AI_GO_CONSUMER_KEY}:{API_AI_GO_CONSUMER_SECRET}".encode("utf-8")
     ).decode("ascii")
-    response = requests.post(
+    response = _post_form_with_cooldown(
+        "api_ai_go_token",
         API_AI_GO_TOKEN_URL,
-        headers={
+        {
             "Authorization": f"Basic {basic}",
             "Content-Type": "application/x-www-form-urlencoded",
         },
-        data={"grant_type": "client_credentials"},
-        timeout=AI_REQUEST_TIMEOUT_SECONDS,
+        {"grant_type": "client_credentials"},
     )
-    if not response.ok:
+    if response is None:
         return None
     data = response.json()
     access_token = data.get("access_token")
@@ -559,13 +603,14 @@ def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] |
     token = _get_api_ai_go_token()
     if not token:
         return None
-    response = requests.post(
+    response = _post_json_with_cooldown(
+        "api_ai_go",
         API_AI_GO_ENDPOINT,
-        headers={
+        {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
-        json={
+        {
             "model": API_AI_GO_MODEL,
             "messages": [
                 {"role": "system", "content": system_prompt},
@@ -573,9 +618,8 @@ def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] |
             ],
             "temperature": 0.1,
         },
-        timeout=AI_REQUEST_TIMEOUT_SECONDS,
     )
-    if not response.ok:
+    if response is None:
         return None
     data = response.json()
     text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
@@ -587,29 +631,9 @@ def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, 
         ("api_ai_go", lambda: _request_api_ai_go(system_prompt, user_prompt)),
         ("google", lambda: _request_google(system_prompt, user_prompt)),
         (
-            "openai",
-            lambda: _request_openai_compatible(
-                "https://api.openai.com/v1/chat/completions",
-                OPENAI_API_KEY,
-                OPENAI_MODEL,
-                system_prompt,
-                user_prompt,
-            ),
-        ),
-        ("claude", lambda: _request_claude(system_prompt, user_prompt)),
-        (
-            "xai",
-            lambda: _request_openai_compatible(
-                "https://api.x.ai/v1/chat/completions",
-                XAI_API_KEY,
-                XAI_MODEL,
-                system_prompt,
-                user_prompt,
-            ),
-        ),
-        (
             "groq",
             lambda: _request_openai_compatible(
+                "groq",
                 "https://api.groq.com/openai/v1/chat/completions",
                 GROQ_API_KEY,
                 GROQ_MODEL,
@@ -620,6 +644,7 @@ def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, 
         (
             "mistral",
             lambda: _request_openai_compatible(
+                "mistral",
                 "https://api.mistral.ai/v1/chat/completions",
                 MISTRAL_API_KEY,
                 MISTRAL_MODEL,
@@ -643,32 +668,45 @@ def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, 
     return None
 
 
-def _chat_completion_request(payload: dict[str, Any]) -> requests.Response:
-    if _is_usable_secret(LOVABLE_API_KEY):
-        return requests.post(
-            "https://ai.gateway.lovable.dev/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {LOVABLE_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=AI_REQUEST_TIMEOUT_SECONDS,
-        )
+def _normalize_sentiment(value: Any) -> str:
+    text = str(value or "").strip().casefold()
+    if not text:
+        return "neutro"
+    mapping = {
+        "positivo": "positivo",
+        "positiva": "positivo",
+        "positive": "positivo",
+        "negativo": "negativo",
+        "negativa": "negativo",
+        "negative": "negativo",
+        "neutro": "neutro",
+        "neutra": "neutro",
+        "neutral": "neutro",
+        "mixed": "neutro",
+    }
+    return mapping.get(text, "neutro")
 
-    if _is_usable_secret(OPENAI_API_KEY):
-        openai_payload = dict(payload)
-        openai_payload["model"] = OPENAI_MODEL or payload.get("model") or "gpt-4o-mini"
-        return requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json=openai_payload,
-            timeout=AI_REQUEST_TIMEOUT_SECONDS,
-        )
 
-    raise RuntimeError("Nenhuma chave de IA válida configurada")
+def _normalize_result(result: dict[str, Any], title: str, content: str) -> dict[str, Any]:
+    normalized = dict(result)
+    normalized["title"] = (title or "").strip()
+
+    if not isinstance(normalized.get("content"), str) or not normalized.get("content"):
+        normalized["content"] = content[:2000]
+
+    sentiment_value = normalized.get("sentiment")
+    if sentiment_value in (None, "") and "sentiv" in normalized:
+        sentiment_value = normalized.get("sentiv")
+    normalized["sentiment"] = _normalize_sentiment(sentiment_value)
+
+    classification = str(normalized.get("classification") or "").strip().casefold()
+    if not classification:
+        classification = "outro"
+    normalized["classification"] = classification
+
+    relevant = normalized.get("relevant")
+    normalized["relevant"] = bool(relevant) if isinstance(relevant, bool) else True
+    return normalized
 
 
 def classify_news(text_content: str, title: str, url: str, entity_name: str) -> dict[str, Any] | None:
@@ -687,6 +725,7 @@ def classify_news(text_content: str, title: str, url: str, entity_name: str) -> 
     result = _classify_with_fallbacks(system_prompt, user_prompt)
     if not isinstance(result, dict):
         return None
+    result = _normalize_result(result, title=title, content=truncated)
 
     base_mentions: list[Any] = []
     if isinstance(result.get("people_mentioned"), list):

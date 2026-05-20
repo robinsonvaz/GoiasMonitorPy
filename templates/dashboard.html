@@ -101,6 +101,13 @@
                   <span class="badge badge-sentiment-{{ news.sentiment }}">{{ news.sentiment }}</span>
                   <span class="badge badge-secondary">{{ class_labels.get(news.classification, news.classification) }}</span>
                 </div>
+                <div class="text-xs text-muted mt-1">
+                  {% if news.published_at %}
+                    {{ news.published_at | datetime_br }}
+                  {% elif news.collected_at %}
+                    {{ news.collected_at | datetime_br }}
+                  {% endif %}
+                </div>
               </div>
             </div>
           </div>

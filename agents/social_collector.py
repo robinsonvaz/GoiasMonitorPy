@@ -2,14 +2,10 @@
 from __future__ import annotations
 
 import json
-import re
 import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
-
-from config import LOVABLE_API_KEY
 from db import query_all, execute
 from tools import google_search, ai_classifier
 from tools.news_dedup import build_dedup_fields, find_existing_news_duplicate, normalize_url
@@ -34,9 +30,6 @@ def _existing_url_set(urls: list[str]) -> set[str]:
 
 
 def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, Any]:
-    if not LOVABLE_API_KEY:
-        return {"success": False, "error": "LOVABLE_API_KEY não configurada"}
-
     if entity_id:
         entities = query_all(
             "SELECT * FROM monitored_entities WHERE is_active = 1 AND id = %s",
@@ -110,46 +103,32 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
         if not new_results:
             continue
 
-        with open("prompts/social_classifier.txt", encoding="utf-8") as f:
-            base_prompt = f.read().replace("{{entity_name}}", entity["name"])
-
         for result in new_results:
-            full_content = (result.markdown or result.description or result.title)
-            text_content = full_content[:3000]
-            resp = requests.post(
-                "https://ai.gateway.lovable.dev/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {LOVABLE_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "google/gemini-2.5-flash",
-                    "messages": [
-                        {"role": "system", "content": base_prompt},
-                        {
-                            "role": "user",
-                            "content": f"Título: {result.title}\nURL: {result.url}\nConteúdo:\n{text_content}",
-                        },
-                    ],
-                    "temperature": 0.1,
-                },
-                timeout=30,
+            source_title = google_search._sanitize_title(result.title or "") or (result.url or "")
+            full_content = (result.markdown or "").strip()
+            published_at = result.published_at
+            if (not full_content or not published_at) and result.url:
+                captured = google_search.capture_article_details(result.url, summary_mode=False)
+                if not full_content and captured.text:
+                    full_content = captured.text.strip()
+                if not published_at and captured.published_at:
+                    published_at = captured.published_at
+            text_content = full_content or result.description or source_title
+
+            classified = ai_classifier.classify_news(
+                text_content=text_content,
+                title=source_title,
+                url=result.url,
+                entity_name=entity["name"],
             )
 
-            if not resp.ok:
-                continue
-
-            raw_content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-            cleaned = re.sub(r"```json\n?|```\n?", "", raw_content).strip()
-            try:
-                classified = json.loads(cleaned)
-            except json.JSONDecodeError:
+            if not classified:
                 continue
 
             merged_mentions = ai_classifier.enrich_people_mentioned(
                 classified.get("people_mentioned") if isinstance(classified, dict) else [],
-                title=classified.get("title") or result.title,
-                content=classified.get("content") or text_content,
+                title=source_title,
+                content=classified.get("content") or full_content or text_content,
                 entity_name=entity["name"],
             )
             classified["people_mentioned"] = merged_mentions
@@ -158,7 +137,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 continue
 
             dedup_fields = build_dedup_fields(
-                title=classified.get("title") or result.title,
+                title=source_title,
                 content=classified.get("content") or result.description,
                 full_text=full_content,
                 source_url=result.url,
@@ -186,12 +165,12 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 (id, entity_id, title, content, full_content, source_url, source_url_norm, source_name,
                  title_norm, content_hash, dedup_key, classification, sentiment,
                  people_mentioned, published_at, collected_at, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NOW(6), NOW(6))
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(6), NOW(6))
                 """,
                 (
                     news_item_id,
                     entity["id"],
-                    classified.get("title") or result.title,
+                    source_title,
                     classified.get("content") or result.description or None,
                     full_content,
                     result.url,
@@ -203,6 +182,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                     classified.get("classification", "outro"),
                     classified.get("sentiment", "neutro"),
                     json.dumps(classified.get("people_mentioned") or [], ensure_ascii=False),
+                    published_at,
                 ),
             )
             total_collected += 1
@@ -223,7 +203,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                         user_id,
                         news_item_id,
                         f"Mídia negativa (social): {entity['name']}",
-                        classified.get("title") or result.title,
+                        source_title,
                         "warning",
                     ),
                 )

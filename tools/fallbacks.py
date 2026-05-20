@@ -8,6 +8,8 @@ This module implements a simple, prioritized collector using free sources:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from html import unescape
 import re
 from typing import List
@@ -18,6 +20,7 @@ import requests
 import feedparser
 
 from config import RSS_FEEDS, GOOGLE_ALERTS_RSS
+from tools import google_search
 from tools.google_search import SearchResult
 
 try:
@@ -77,8 +80,41 @@ _GOIAS_CONTEXT_MARKERS = (
 )
 
 
-def _make_result(url: str, title: str, description: str = "") -> SearchResult:
-    return SearchResult(url=url, title=title, description=description)
+def _make_result(
+    url: str,
+    title: str,
+    description: str = "",
+    published_at: datetime | None = None,
+) -> SearchResult:
+    cleaned_title = _sanitize_title(title)
+    return SearchResult(url=url, title=cleaned_title, description=description, published_at=published_at)
+
+
+def _sanitize_title(value: str) -> str:
+    cleaned = unescape(value or "")
+    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _rss_entry_published_at(entry: dict) -> datetime | None:
+    parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+    if parsed is not None:
+        try:
+            return datetime(*parsed[:6])
+        except Exception:
+            pass
+
+    text_value = (entry.get("published") or entry.get("updated") or "").strip()
+    if not text_value:
+        return None
+    try:
+        dt = parsedate_to_datetime(text_value)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
 
 
 def _normalize_text(value: str) -> str:
@@ -330,7 +366,7 @@ def fetch_rss_entries(
             link = (e.get("link") or "").strip()
             if not link or link in seen:
                 continue
-            title = (e.get("title") or "").strip()
+            title = _sanitize_title((e.get("title") or "").strip())
             summary = _clean_candidate_text((e.get("summary") or e.get("description") or "").strip())
             if tag_terms is not None and not _matches_entity_tags(title, summary, tag_terms):
                 continue
@@ -350,7 +386,7 @@ def fetch_rss_entries(
                 summary = _clean_candidate_text(full_text, max_sentences=3, max_chars=700)
 
             seen.add(link)
-            item = _make_result(link, title or link, summary)
+            item = _make_result(link, title or link, summary, published_at=_rss_entry_published_at(e))
             if full_text:
                 item.markdown = full_text
             results.append(item)
@@ -363,21 +399,34 @@ def fetch_rss_entries(
 
 
 def extract_article_text(url: str, summary_mode: bool = True) -> str | None:
-    """Attempt to extract article body using trafilatura when available."""
+    """Extract article body using robust capture chain with local fallback."""
+    details = extract_article_details(url, summary_mode=summary_mode)
+    return details[0]
+
+
+def extract_article_details(url: str, summary_mode: bool = True) -> tuple[str | None, datetime | None]:
+    """Extract article body and publication date using robust capture chain."""
+    try:
+        captured_details = google_search.capture_article_details(url, summary_mode=summary_mode)
+    except Exception:
+        captured_details = google_search.CapturedArticle(text=None, published_at=None)
+    if captured_details.text:
+        return captured_details.text, captured_details.published_at
+
     if trafilatura is None:
-        return None
+        return None, captured_details.published_at
     try:
         downloaded = trafilatura.fetch_url(url)
         if not downloaded:
-            return None
+            return None, captured_details.published_at
         text = trafilatura.extract(downloaded, include_comments=False, include_tables=False)
         if summary_mode:
             cleaned = _clean_candidate_text(text or "", max_sentences=6, max_chars=1800)
         else:
             cleaned = _clean_candidate_text(text or "", max_sentences=None, max_chars=120000)
-        return cleaned or None
+        return cleaned or None, captured_details.published_at
     except Exception:
-        return None
+        return None, captured_details.published_at
 
 
 def _merge_unique_results(*groups: List[SearchResult], limit: int) -> List[SearchResult]:

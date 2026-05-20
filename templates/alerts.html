@@ -68,7 +68,14 @@
               </p>
             {% endif %}
           {% endif %}
-          <span class="text-xs text-muted">{{ alert.created_at | datetime_br }}</span>
+          <div class="text-xs text-muted mt-0.5">
+            {% if alert.news_items and alert.news_items.published_at %}
+              <span>Publicado: {{ alert.news_items.published_at | datetime_br }}</span>
+              <span class="opacity-60"> · Alerta: {{ alert.created_at | datetime_br }}</span>
+            {% else %}
+              <span>{{ alert.created_at | datetime_br }}</span>
+            {% endif %}
+          </div>
         </div>
         {% if not alert.is_read %}
           <button

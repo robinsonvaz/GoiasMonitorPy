@@ -35,7 +35,7 @@
     hx-select="#news-results"
     hx-swap="outerHTML"
     hx-push-url="true"
-    hx-trigger="submit, change from:select, keyup changed delay:400ms from:[name='search']"
+    hx-trigger="submit, change from:select, change from:input[type='date'], keyup changed delay:400ms from:[name='search']"
     method="GET" action="{{ url_for('news') }}" class="filters-row">
     <div class="search-wrap">
       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -59,8 +59,12 @@
         <option value="{{ e.id }}" {% if filters.entity == e.id %}selected{% endif %}>{{ e.name }}</option>
       {% endfor %}
     </select>
+    <div class="date-input-pair">
+      <input type="date" name="start_date" value="{{ filters.start_date }}" class="input date-input" title="Data inicial de publicação" aria-label="Data inicial de publicação" />
+      <input type="date" name="end_date" value="{{ filters.end_date }}" class="input date-input" title="Data final de publicação" aria-label="Data final de publicação" />
+    </div>
     <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
-    {% if filters.search or filters.classification != 'all' or filters.sentiment != 'all' or filters.entity != 'all' %}
+    {% if filters.search or filters.classification != 'all' or filters.sentiment != 'all' or filters.entity != 'all' or filters.start_date or filters.end_date %}
       <a href="{{ url_for('news') }}" class="btn btn-ghost btn-sm">Limpar</a>
     {% endif %}
   </form>
@@ -106,9 +110,14 @@
                 {% endfor %}
               </div>
             {% endif %}
-            <span class="text-xs text-muted mt-1 block">
-              {{ news.collected_at | datetime_br if news.collected_at else '' }}
-            </span>
+            <div class="text-xs text-muted mt-1">
+              {% if news.published_at %}
+                <span>Publicado: {{ news.published_at | datetime_br }}</span>
+                <span class="opacity-60"> · Coletado: {{ news.collected_at | datetime_br if news.collected_at else '' }}</span>
+              {% else %}
+                <span>Coletado: {{ news.collected_at | datetime_br if news.collected_at else '' }}</span>
+              {% endif %}
+            </div>
             {% if news.source_url %}
               <div class="mt-2">
                 <a href="{{ news.source_url }}" target="_blank" rel="noopener noreferrer" class="news-open-btn" title="Abrir notícia">

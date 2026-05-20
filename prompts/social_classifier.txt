@@ -9,23 +9,73 @@ Analise a publicação e retorne APENAS um JSON válido (sem markdown) com:
   "relevant": true | false
 }
 
-Critério central de sentimento:
-- O sentimento deve refletir a QUALIDADE DA ATUAÇÃO DO ESTADO (governo/órgão/entidade monitorada).
-- positivo: Estado atuou corretamente, cumpriu seu dever, resolveu problema, reprimiu crime/irregularidade com sucesso.
-- negativo: Estado não atuou, atuou mal, cometeu irregularidade, sofreu operação/denúncia, desperdiçou recurso público, seus agentes estão envolvidos em má conduta.
-- neutro: informação factual, administrativa, sem indicação clara de boa ou má atuação.
 
-Guia prático de atuação estatal:
-- Classifique como POSITIVO quando: crime foi reprimido com prisão, prevenção bem-sucedida, entrega de política pública, transparência comprovada, resultado mensurável beneficiando população.
-  Exemplo: "Polícia Civil prendeu suspeitos de latrocínio" (atuação positiva do Estado na segurança pública).
-  
-- Classifique como NEGATIVO quando: há denúncia de corrupção, irregularidade, desperdício de recursos públicos, operação policial/ministério público envolvendo servidor ou órgão público, envolvimento direto de funcionários em má conduta, prisão de pessoas relacionadas a fornecedores que fraudaram Estado, colapso de serviço estatal, omissão grave.
-  Exemplo: "Denúncia: prefeito desvia recursos do SUS para campanha política" (atuação inadequada do Estado).
-  Exemplo: "Operação prende assessor de secretário de estado por corrupção" (atuação inadequada apareceu através da operação).
-  
-- Classifique como NEUTRO quando: não há indicação clara de como o Estado atuou (apenas menção administrativa) ou quando é ambíguo o juízo sobre a conduta estatal.
+== CRITÉRIO CENTRAL DE SENTIMENTO ==
 
-Classificações:
+O sentimento reflete EXCLUSIVAMENTE a qualidade da atuação da entidade/Estado monitorado — não o tom geral da publicação nem a opinião do autor.
+
+Pergunta-chave antes de classificar:
+  (A) O Estado/entidade é o AGENTE que age, resolve ou previne? → tende a POSITIVO
+  (B) O Estado/entidade é o ALVO, está envolvido em irregularidade ou falhou? → tende a NEGATIVO
+  (C) O State/entidade é mencionado apenas como contexto, ou o evento é externo sem reação estatal destacada? → NEUTRO
+
+
+== POSITIVO ==
+- Estado reprime crime cometido por PARTICULAR com resultado concreto: prisão efetuada, apreensão, desarticulação de quadrilha.
+  ATENÇÃO: divulgação de informações sobre ocorrência ou acidente envolvendo particular (sem prisão ou resultado destacado) é NEUTRO.
+- Estado age para controlar problema externo (surto, desastre, violência): secretaria lança força-tarefa, governador anuncia medidas emergenciais.
+- Entrega de obra, serviço ou política pública com resultado concreto.
+- Reconhecimento externo, auditoria positiva, prêmio.
+- Resultado mensurável que beneficia a população.
+
+Exemplos POSITIVOS:
+  ✓ "PF prende quadrilha de migração ilegal que operava em Goiás"
+  ✓ "Secretaria de Saúde distribui kits de combate à dengue em 60 municípios"
+  ✓ "Governo entrega escola renovada para comunidade de Aparecida"
+  ✓ "Polícia Civil fecha esquema de lavagem de dinheiro no estado"
+
+
+== NEGATIVO ==
+- Operação policial, do MP, TCE ou CGU com ALVO em servidor, órgão, agente político ou empresa que fraudou o Estado.
+- Denúncia de corrupção, desvio, superfaturamento, nepotismo relacionado a recurso público.
+- Prisão ou indiciamento de agente público, secretário, governador, assessor ou político ligado ao Estado.
+- Colapso ou falha grave de serviço público essencial por omissão ou má gestão.
+- Investigação de fornecedor por fraude em contrato público.
+- Publicação que critica diretamente conduta do governante ou órgão com base em fatos.
+
+Exemplos NEGATIVOS:
+  ✗ "PF faz buscas na Secretaria de Infraestrutura por suspeita de fraude em licitação"
+  ✗ "Governador é alvo de investigação por suspeita de envolvimento em esquema criminal"
+  ✗ "Assessor de secretário é preso por corrupção passiva"
+  ✗ "Empresa fornecedora paga propina a servidor do Estado, diz MP"
+  ✗ "Hospital público fecha leitos por falta de verba após cortes"
+
+
+== NEUTRO ==
+- Fenômeno externo (surto, desastre, crime de particular) sem destaque de ação ou omissão do Estado.
+- Ato puramente protocolar, informativo ou administrativo.
+- Nomeação/exoneração sem irregularidade associada.
+- Ambiguidade genuína que não permite concluir se o Estado agiu bem ou mal.
+- **Polícia/órgão de segurança apenas apresenta informações sobre ocorrência policial ou acidente envolvendo PARTICULAR**, sem destacar prisão efetuada ou resultado operacional concreto.
+
+Exemplos NEUTROS:
+  ~ "Goiás registra alta de casos de dengue neste verão"
+  ~ "Secretária participa de evento nacional em Brasília"
+  ~ "Novo secretário de Finanças toma posse"
+  ~ "Goiânia sedia evento esportivo nacional"
+  ~ "PM informa sobre acidente com duas vítimas fatais na GO-020" — divulgação de ocorrência sem resultado operacional.
+  ~ "PC divulga andamento de investigação sobre roubo a residência" — informativo sobre caso em andamento.
+
+
+== REGRA DE DESEMPATE ==
+
+Quando a publicação mistura informação positiva e negativa sobre o Estado, avalie o FOCO PRINCIPAL:
+- Foco no crime de particular reprimido pelo Estado → POSITIVO.
+- Foco em investigação ou falha do Estado → NEGATIVO.
+- Sem foco claro → NEUTRO.
+
+
+== CLASSIFICAÇÕES ==
 - midia_negativa: críticas, escândalos, denúncias, corrupção nas redes sociais
 - nomeacao: anúncio de nomeação para cargo
 - exoneracao: anúncio de exoneração de cargo
@@ -34,4 +84,5 @@ Classificações:
 - movimentacao: transferências, mudanças administrativas
 - acao_judicial: menções a processos, ações judiciais
 - outro: não se encaixa nas categorias acima
+
 Se a publicação NÃO for relevante para "{{entity_name}}" ou para o estado de Goiás, retorne relevant: false.

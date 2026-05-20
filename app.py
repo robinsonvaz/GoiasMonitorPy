@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any, Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -314,6 +314,8 @@ async def news(
     classification: str = "all",
     sentiment: str = "all",
     entity: str = "all",
+    start_date: str = "",
+    end_date: str = "",
 ) -> HTMLResponse:
     all_entities: list[dict[str, Any]] = query_all(
         "SELECT id, name FROM monitored_entities ORDER BY name"
@@ -330,6 +332,39 @@ async def news(
         n["people_mentioned"] = parse_json_list(n.get("people_mentioned"))
         n["monitored_entities"] = {"name": n.pop("entity_name")} if n.get("entity_name") else None
 
+    def _parse_date_param(value: str) -> date | None:
+        raw = (value or "").strip()
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    start_date_obj = _parse_date_param(start_date)
+    end_date_obj = _parse_date_param(end_date)
+
+    def _published_date(item: dict[str, Any]) -> date | None:
+        published = item.get("published_at")
+        if not published:
+            return None
+        if isinstance(published, datetime):
+            return published.date()
+        try:
+            return datetime.fromisoformat(str(published).replace("Z", "+00:00")).date()
+        except Exception:
+            return None
+
+    def _matches_publication_period(item: dict[str, Any]) -> bool:
+        published_date = _published_date(item)
+        if start_date_obj:
+            if not published_date or published_date < start_date_obj:
+                return False
+        if end_date_obj:
+            if not published_date or published_date > end_date_obj:
+                return False
+        return True
+
     search_lower = search.lower()
     filtered = [
         n for n in news_items
@@ -339,6 +374,7 @@ async def news(
         and (classification == "all" or n.get("classification") == classification)
         and (sentiment == "all" or n.get("sentiment") == sentiment)
         and (entity == "all" or n.get("entity_id") == entity)
+        and _matches_publication_period(n)
     ]
     return _render(
         request,
@@ -350,6 +386,8 @@ async def news(
             "classification": classification,
             "sentiment": sentiment,
             "entity": entity,
+            "start_date": start_date,
+            "end_date": end_date,
         },
         user=user,
     )
@@ -444,7 +482,8 @@ async def entities_post(
 async def alerts(request: Request, user: UserDep) -> HTMLResponse:
     all_alerts: list[dict[str, Any]] = query_all(
         """
-        SELECT a.*, n.title AS news_title, n.source_url AS news_source_url
+        SELECT a.*, n.title AS news_title, n.source_url AS news_source_url,
+               n.published_at AS news_published_at
         FROM alerts a
         LEFT JOIN news_items n ON n.id = a.news_item_id
         WHERE a.user_id = %s
@@ -457,8 +496,10 @@ async def alerts(request: Request, user: UserDep) -> HTMLResponse:
             a["news_items"] = {
                 "title": a.pop("news_title"),
                 "source_url": a.pop("news_source_url", None),
+                "published_at": a.pop("news_published_at", None),
             }
         else:
+            a.pop("news_published_at", None)
             a["news_items"] = None
 
     unread_count = sum(1 for a in all_alerts if not a.get("is_read"))

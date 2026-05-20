@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     api_ai_go_base_url: str = Field(default="")
     api_ai_go_endpoint: str = Field(default="")
     api_ai_go_model: str = Field(default="llama-31-8b-instruct")
+    serper_api_key: str = Field(default="")
+    serpapi_key: str = Field(default="")
+    searchapi_api_key: str = Field(default="")
+    searchapi_enabled: bool = Field(default=True)
+    tavily_api_key: str = Field(default="")
+    jina_api_key: str = Field(default="")
+    playwright_enabled: bool = Field(default=True)
+    web_provider_cooldown_seconds: int = Field(default=120)
+    llm_provider_cooldown_seconds: int = Field(default=180)
     firecrawl_api_key: str = Field(default="")
     scrapingbee_api_key: str = Field(default="")
     rss_feeds: list[str] = Field(default_factory=list)
@@ -115,6 +124,15 @@ API_AI_GO_TOKEN_URL = settings.api_ai_go_token_url
 API_AI_GO_BASE_URL = settings.api_ai_go_base_url
 API_AI_GO_ENDPOINT = settings.api_ai_go_endpoint
 API_AI_GO_MODEL = settings.api_ai_go_model
+SERPER_API_KEY = settings.serper_api_key
+SERPAPI_KEY = settings.serpapi_key
+SEARCHAPI_API_KEY = settings.searchapi_api_key
+SEARCHAPI_ENABLED = settings.searchapi_enabled
+TAVILY_API_KEY = settings.tavily_api_key
+JINA_API_KEY = settings.jina_api_key
+PLAYWRIGHT_ENABLED = settings.playwright_enabled
+WEB_PROVIDER_COOLDOWN_SECONDS = max(10, settings.web_provider_cooldown_seconds)
+LLM_PROVIDER_COOLDOWN_SECONDS = max(10, settings.llm_provider_cooldown_seconds)
 FIRECRAWL_API_KEY = settings.firecrawl_api_key
 SCRAPINGBEE_API_KEY = settings.scrapingbee_api_key
 RSS_FEEDS = settings.rss_feeds

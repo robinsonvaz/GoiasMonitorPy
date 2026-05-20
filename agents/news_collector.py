@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 import json
 import threading
 import time
@@ -32,7 +33,7 @@ def _existing_url_set(urls: list[str]) -> set[str]:
 
 def _fallback_classification(result: google_search.SearchResult) -> dict[str, Any]:
     return {
-        "title": result.title,
+        "title": fallbacks._sanitize_title(result.title or ""),
         "content": result.description or result.markdown or None,
         "classification": "outro",
         "sentiment": "neutro",
@@ -45,36 +46,43 @@ def _fallback_classification(result: google_search.SearchResult) -> dict[str, An
 def _prepare_result_for_classification(
     result: google_search.SearchResult,
     entity_name: str,
-    extraction_cache: dict[str, str],
+    extraction_cache: dict[str, tuple[str, datetime | None]],
     cache_lock: threading.Lock,
 ) -> dict[str, Any]:
+    source_title = fallbacks._sanitize_title(result.title or "") or (result.url or "")
     extraction_started = time.perf_counter()
     full_content = (result.markdown or "").strip()
+    published_at = result.published_at
     extraction_cache_hit = False
     extraction_attempted = False
 
-    if not full_content and result.url:
+    if (not full_content or not published_at) and result.url:
         extraction_attempted = True
         cache_key = normalize_url(result.url)
         with cache_lock:
             cached_value = extraction_cache.get(cache_key)
             extraction_cache_hit = cached_value is not None
 
-        extracted = cached_value if cached_value is not None else fallbacks.extract_article_text(result.url, summary_mode=False)
+        if cached_value is not None:
+            extracted, extracted_published_at = cached_value
+        else:
+            extracted, extracted_published_at = fallbacks.extract_article_details(result.url, summary_mode=False)
 
         if not extraction_cache_hit:
             with cache_lock:
                 if cache_key not in extraction_cache and len(extraction_cache) >= _EXTRACTION_CACHE_MAX_ITEMS:
                     extraction_cache.pop(next(iter(extraction_cache)))
-                extraction_cache[cache_key] = extracted or ""
+                extraction_cache[cache_key] = (extracted or "", extracted_published_at)
 
-        if extracted:
+        if extracted and not full_content:
             full_content = extracted
+        if not published_at and extracted_published_at:
+            published_at = extracted_published_at
     extraction_time_ms = (time.perf_counter() - extraction_started) * 1000.0
 
-    text_content = full_content or result.description or result.title
+    text_content = full_content or result.description or source_title
     classification_started = time.perf_counter()
-    classified = ai_classifier.classify_news(text_content, result.title, result.url, entity_name)
+    classified = ai_classifier.classify_news(text_content, source_title, result.url, entity_name)
     classification_time_ms = (time.perf_counter() - classification_started) * 1000.0
     used_ai_fallback = False
     if not classified:
@@ -82,7 +90,7 @@ def _prepare_result_for_classification(
         used_ai_fallback = True
 
     dedup_fields = build_dedup_fields(
-        title=classified.get("title") or result.title,
+        title=source_title,
         content=classified.get("content") or result.description,
         full_text=full_content or text_content,
         source_url=result.url,
@@ -94,6 +102,7 @@ def _prepare_result_for_classification(
         "text_content": text_content,
         "dedup_fields": dedup_fields,
         "used_ai_fallback": used_ai_fallback,
+        "published_at": published_at,
         "extraction_time_ms": extraction_time_ms,
         "classification_time_ms": classification_time_ms,
         "extraction_attempted": extraction_attempted,
@@ -123,7 +132,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
     total_collected = 0
     fallback_classifications = 0
     strategy_counts = {"rss_feeds": 0, "google_alerts": 0, "google_news": 0, "open_web": 0}
-    extraction_cache: dict[str, str] = {}
+    extraction_cache: dict[str, tuple[str, datetime | None]] = {}
     cache_lock = threading.Lock()
 
     for entity in entities:
@@ -236,18 +245,20 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 except Exception as exc:
                     result = future_map[future]
                     print(f"[Classification] Error for {result.url}: {exc}")
+                    source_title = fallbacks._sanitize_title(result.title or "") or (result.url or "")
                     prepared = {
                         "result": result,
                         "classified": _fallback_classification(result),
                         "full_content": (result.markdown or "").strip(),
-                        "text_content": (result.markdown or result.description or result.title),
+                        "text_content": (result.markdown or result.description or source_title),
                         "dedup_fields": build_dedup_fields(
-                            title=result.title,
+                            title=source_title,
                             content=result.description,
-                            full_text=(result.markdown or result.description or result.title),
+                            full_text=(result.markdown or result.description or source_title),
                             source_url=result.url,
                         ),
                         "used_ai_fallback": True,
+                        "published_at": result.published_at,
                         "extraction_time_ms": 0.0,
                         "classification_time_ms": 0.0,
                         "extraction_attempted": False,
@@ -261,6 +272,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
             classified = prepared["classified"]
             full_content = prepared["full_content"]
             text_content = prepared["text_content"]
+            published_at = prepared.get("published_at")
             dedup_fields = prepared["dedup_fields"]
             perf_metrics["extraction_ms"] += float(prepared.get("extraction_time_ms") or 0.0)
             perf_metrics["classification_ms"] += float(prepared.get("classification_time_ms") or 0.0)
@@ -301,12 +313,12 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                 (id, entity_id, title, content, full_content, source_url, source_url_norm, source_name,
                  title_norm, content_hash, dedup_key, classification, sentiment,
                  people_mentioned, published_at, collected_at, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NOW(6), NOW(6))
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(6), NOW(6))
                 """,
                 (
                     news_item_id,
                     entity["id"],
-                    classified.get("title") or result.title,
+                    fallbacks._sanitize_title(result.title or "") or (result.url or ""),
                     classified.get("content") or result.description or None,
                     full_content or text_content,
                     result.url,
@@ -318,6 +330,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                     classified.get("classification", "outro"),
                     classified.get("sentiment", "neutro"),
                     json.dumps(classified.get("people_mentioned") or [], ensure_ascii=False),
+                    published_at,
                 ),
             )
             perf_metrics["insert_ms"] += (time.perf_counter() - insert_started) * 1000.0
@@ -343,7 +356,7 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                         user_id,
                         news_item_id,
                         f"Mídia negativa: {entity['name']}",
-                        classified.get("title") or result.title,
+                        fallbacks._sanitize_title(result.title or "") or (result.url or ""),
                         "warning",
                     ),
                 )
