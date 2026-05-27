@@ -28,7 +28,7 @@
       <h2 class="settings-section-title">Perfil</h2>
     </div>
     <form method="POST" action="{{ url_for('settings') }}" class="settings-form"
-      hx-post="/configuracoes"
+      hx-post="{{ url_for('settings') }}"
       hx-swap="none">
       <div class="form-group">
         <label>Nome completo</label>

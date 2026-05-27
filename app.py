@@ -94,6 +94,31 @@ async def _lifespan(_app: FastAPI):  # type: ignore[type-arg]
 # App setup
 # ---------------------------------------------------------------------------
 
+
+def _normalize_root_path(value: str) -> str:
+    value = (value or "").strip()
+    if not value or value == "/":
+        return ""
+    if not value.startswith("/"):
+        value = f"/{value}"
+    return value.rstrip("/")
+
+
+_APP_ROOT_PATH = _normalize_root_path(settings.app_root_path)
+
+
+def _with_root_path(path: str) -> str:
+    if not path.startswith("/"):
+        path = f"/{path}"
+    if _APP_ROOT_PATH and (path == _APP_ROOT_PATH or path.startswith(f"{_APP_ROOT_PATH}/")):
+        return path
+    return f"{_APP_ROOT_PATH}{path}"
+
+
+def _redirect(path: str, status_code: int = 302) -> RedirectResponse:
+    return RedirectResponse(url=_with_root_path(path), status_code=status_code)
+
+
 app = FastAPI(title="GoiasMonitorPy", lifespan=_lifespan)
 app.add_middleware(
     SessionMiddleware,
@@ -109,8 +134,8 @@ def _make_url_for(fastapi_app: FastAPI) -> Callable[..., str]:
     def url_for(name: str, **values: Any) -> str:
         if name == "static":
             filename: str = values.pop("filename", values.pop("path", ""))
-            return str(fastapi_app.url_path_for("static", path=filename))
-        return str(fastapi_app.url_path_for(name, **values))
+            return _with_root_path(str(fastapi_app.url_path_for("static", path=filename)))
+        return _with_root_path(str(fastapi_app.url_path_for(name, **values)))
     return url_for
 
 
@@ -142,7 +167,7 @@ class _RequiresLogin(Exception):
 
 @app.exception_handler(_RequiresLogin)
 async def _requires_login_handler(request: Request, exc: _RequiresLogin) -> RedirectResponse:
-    return RedirectResponse(url="/auth", status_code=302)
+    return _redirect("/auth", status_code=302)
 
 
 def _flash(request: Request, message: str, category: str = "info") -> None:
@@ -182,7 +207,7 @@ UserDep = Annotated[dict[str, str], Depends(_require_login)]
 @app.get("/auth", response_class=HTMLResponse, name="auth")
 async def auth(request: Request) -> Response:
     if request.session.get("user_id"):
-        return RedirectResponse(url="/", status_code=302)
+        return _redirect("/", status_code=302)
     return _render(request, "auth.html", error=None)
 
 
@@ -205,7 +230,7 @@ async def auth_post(
             request.session["user_id"] = user["id"]
             request.session["user_email"] = user["email"]
             request.session["full_name"] = user.get("full_name") or ""
-            return RedirectResponse(url="/", status_code=303)
+            return _redirect("/", status_code=303)
         # register
         if not email or not password:
             raise ValueError("Preencha e-mail e senha")
@@ -226,7 +251,7 @@ async def auth_post(
         request.session["user_email"] = email
         request.session["full_name"] = name
         _flash(request, "Conta criada com sucesso.", "success")
-        return RedirectResponse(url="/", status_code=303)
+        return _redirect("/", status_code=303)
     except Exception as exc:
         error = str(exc)
     return _render(request, "auth.html", error=error)
@@ -235,7 +260,7 @@ async def auth_post(
 @app.get("/logout", name="logout")
 async def logout(request: Request) -> RedirectResponse:
     request.session.clear()
-    return RedirectResponse(url="/auth", status_code=302)
+    return _redirect("/auth", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -470,7 +495,7 @@ async def entities_post(
             e["keywords"] = parse_json_list(e.get("keywords"))
         return _render(request, "entities.html", entities=all_entities, error=error, user=user)
 
-    return RedirectResponse(url="/entidades", status_code=303)
+    return _redirect("/entidades", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -526,7 +551,7 @@ async def alerts_post(
             )
     except Exception:
         pass
-    return RedirectResponse(url="/alertas", status_code=303)
+    return _redirect("/alertas", status_code=303)
 
 
 @app.post("/api/alertas/{alert_id}/read", name="api_mark_alert_read")
@@ -636,7 +661,7 @@ async def settings_post(
             )
             return resp
         _flash(request, "Perfil atualizado.", "success")
-        return RedirectResponse(url="/configuracoes", status_code=303)
+        return _redirect("/configuracoes", status_code=303)
     except Exception as exc:
         error = str(exc)
 
@@ -771,7 +796,7 @@ async def schedules_post(
             user=user,
         )
 
-    return RedirectResponse(url="/agendamentos", status_code=303)
+    return _redirect("/agendamentos", status_code=303)
 
 
 @app.post("/api/agendamentos/{schedule_id}/executar", name="api_run_schedule")

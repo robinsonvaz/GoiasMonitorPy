@@ -304,18 +304,18 @@ As notícias relevantes são salvas no banco de dados com todos os metadados. Se
 
 ---
 
-## 7. Coleta Automática (Cron Job)
+## 7. Coleta Automática (Agendamentos)
 
-O sistema possui uma tarefa agendada que executa a coleta automaticamente:
+O sistema possui agendamentos internos para executar coletas automaticamente:
 
-- **Frequência:** a cada 6 horas
-- **Horários (UTC):** 00:00, 06:00, 12:00 e 18:00
-- **Funcionamento:** a tarefa faz uma requisição HTTP para a função de coleta, simulando o mesmo processo da coleta manual
+- **Configuração:** na página de **Agendamentos**
+- **Horários:** definidos por você para cada agendamento
+- **Funcionamento:** o scheduler interno executa a mesma rotina de coleta em background
 - **Diferença da coleta manual:** a coleta automática **não gera alertas**, pois não há um usuário autenticado no contexto
 
-### Verificando o status do cron
+### Verificando o status dos agendamentos
 
-O status do cron job pode ser consultado na página de **Configurações** do sistema. A documentação técnica completa do agendamento está disponível em `docs/cron_setup.sql`.
+O status e o histórico operacional devem ser acompanhados na página de **Agendamentos** e nos logs da aplicação.
 
 ---
 
@@ -357,7 +357,7 @@ R: Até 5 resultados por entidade a cada coleta. Após deduplicação e filtrage
 R: Não. Alertas são gerados apenas em coletas manuais, pois requerem um usuário autenticado para associar o alerta.
 
 **P: Posso alterar a frequência da coleta automática?**  
-R: A frequência é configurada a nível de banco de dados (cron job). Consulte o arquivo `docs/cron_setup.sql` para instruções de como alterar o intervalo.
+R: Sim. A frequência é definida na página de **Agendamentos**, onde você pode criar, ativar, desativar e remover horários de execução.
 
 **P: O que acontece se eu desativar uma entidade?**  
 R: Ela deixa de ser incluída nas próximas coletas, mas todas as notícias já coletadas permanecem no banco de dados e continuam visíveis na página de Notícias.

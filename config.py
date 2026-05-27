@@ -31,6 +31,7 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("DEBUG", "FLASK_DEBUG"),
     )
+    app_root_path: str = Field(default="")
     lovable_api_key: str = Field(default="")
     google_api_key: str = Field(
         default="",

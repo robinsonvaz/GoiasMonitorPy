@@ -80,7 +80,7 @@
         {% if not alert.is_read %}
           <button
             class="btn-ghost btn-icon flex-shrink-0"
-            hx-post="/api/alertas/{{ alert.id }}/read"
+            hx-post="{{ url_for('api_mark_alert_read', alert_id=alert.id) }}"
             hx-target="closest .card"
             hx-swap="outerHTML"
             title="Marcar como lido">
