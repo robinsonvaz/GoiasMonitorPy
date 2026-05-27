@@ -3,6 +3,7 @@
 
 param(
     [switch]$NoReload,
+    [switch]$Detached,
     [string]$HostAddr = "127.0.0.1",
     [int]$Port = 8000
 )
@@ -10,6 +11,9 @@ param(
 # Get script directory
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
+
+$logsDir = Join-Path $scriptDir "logs"
+$pidFile = Join-Path $logsDir "uvicorn-$Port.pid"
 
 # Activate virtual environment
 $venvPath = Join-Path $scriptDir ".venv"
@@ -29,7 +33,7 @@ if (-not (Test-Path $pythonExe)) {
 & $activateScript
 
 # Install runtime dependencies only when uvicorn is not available in the venv
-$uvicornCheck = & $pythonExe -c "import uvicorn" 2>$null
+$null = & $pythonExe -c "import uvicorn" 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing runtime dependencies..." -ForegroundColor Cyan
     $requirementsFile = Join-Path $scriptDir "requirements.txt"
@@ -71,6 +75,56 @@ $uvicornArgs = @(
 
 if (-not $NoReload) {
     $uvicornArgs += "--reload"
+}
+
+if ($Detached -and -not (Test-Path $logsDir)) {
+    New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+}
+
+if ($Detached -and (Test-Path $pidFile)) {
+    $existingPid = Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($existingPid) {
+        $existingProcess = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
+        if ($null -ne $existingProcess) {
+            Write-Error "GoiasMonitorPy is already running in detached mode with PID $existingPid on port $Port."
+            exit 1
+        }
+    }
+
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+}
+
+if ($Detached) {
+    $stdoutLog = Join-Path $logsDir "uvicorn-$Port.stdout.log"
+    $stderrLog = Join-Path $logsDir "uvicorn-$Port.stderr.log"
+
+    Write-Host "Starting GoiasMonitorPy in detached mode on http://$($HostAddr):$Port" -ForegroundColor Green
+    Write-Host "stdout: $stdoutLog"
+    Write-Host "stderr: $stderrLog"
+
+    $startProcessParams = @{
+        FilePath = $pythonExe
+        ArgumentList = @("-m", "uvicorn") + $uvicornArgs
+        WorkingDirectory = $scriptDir
+        RedirectStandardOutput = $stdoutLog
+        RedirectStandardError = $stderrLog
+        PassThru = $true
+    }
+    $process = Start-Process @startProcessParams
+
+    $process.Id | Set-Content -Path $pidFile -Encoding ascii
+
+    Wait-Process -Id $process.Id -Timeout 2 -ErrorAction SilentlyContinue
+    if ($process.HasExited) {
+        Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+        Write-Error "Detached process exited immediately. Check $stderrLog for details."
+        exit 1
+    }
+
+    Write-Host "Process started with PID $($process.Id)."
+    Write-Host "The app will keep running after this terminal or VS Code is closed."
+    Write-Host "Use Stop-Process -Id $($process.Id) or remove via Task Manager if you need to stop it manually."
+    exit 0
 }
 
 Write-Host "Starting GoiasMonitorPy on http://$($HostAddr):$Port" -ForegroundColor Green

@@ -199,6 +199,21 @@ sc.exe start GoiasMonitorPy
 sc.exe query GoiasMonitorPy
 ```
 
+Validacao importante do tipo do servico (evita comportamento de iniciar e encerrar em seguida):
+
+```powershell
+sc.exe qc GoiasMonitorPy
+```
+
+Confirme em `TYPE` o valor `10  WIN32_OWN_PROCESS`.
+Se aparecer `110 ... (interactive)`, ajuste com NSSM:
+
+```powershell
+D:\nssm\win64\nssm.exe set GoiasMonitorPy Type SERVICE_WIN32_OWN_PROCESS
+sc.exe stop GoiasMonitorPy
+sc.exe start GoiasMonitorPy
+```
+
 Teste novamente:
 - http://127.0.0.1:8000
 
@@ -462,6 +477,14 @@ Verificar:
 sc.exe query GoiasMonitorPy
 netstat -ano | findstr :8000
 ```
+
+Se o servico estiver `RUNNING` mas sem processo escutando em 8000:
+
+```powershell
+sc.exe qc GoiasMonitorPy
+```
+
+Garanta que `TYPE` seja `10  WIN32_OWN_PROCESS` (nao interativo). Em modo interativo (`110`), o backend pode subir e encerrar logo em seguida.
 
 ### Aplicacao sobe, mas login falha
 

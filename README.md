@@ -84,12 +84,25 @@ Observações:
 ./start-app.ps1
 ```
 
+Para manter a aplicação rodando após fechar o terminal ou o VS Code:
+
+```powershell
+./start-app.ps1 -NoReload -Detached
+```
+
+Parar a instância desacoplada:
+
+```powershell
+./stop-app.ps1
+```
+
 Parâmetros úteis:
 
 ```powershell
 ./start-app.ps1 -Port 8001
 ./start-app.ps1 -HostAddr 0.0.0.0 -Port 8000
 ./start-app.ps1 -NoReload
+./start-app.ps1 -NoReload -Detached
 ```
 
 ### Opção 2
