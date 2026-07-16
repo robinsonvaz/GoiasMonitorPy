@@ -220,5 +220,31 @@ def ensure_local_schema() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """
             )
+            # API calls / AI token consumption tracking
+            try:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS api_calls (
+                        id INT NOT NULL AUTO_INCREMENT,
+                        news_item_id CHAR(36) NULL,
+                        node_name VARCHAR(100) NULL,
+                        provider VARCHAR(50) NULL,
+                        model VARCHAR(100) NULL,
+                        input_tokens INT NULL,
+                        output_tokens INT NULL,
+                        duration_sec DOUBLE NULL,
+                        timestamp DATETIME(6) NULL DEFAULT CURRENT_TIMESTAMP(6),
+                        call_type ENUM('AI','REST') DEFAULT 'AI',
+                        service_name VARCHAR(100) NULL,
+                        PRIMARY KEY (id),
+                        KEY news_item_id (news_item_id),
+                        CONSTRAINT api_calls_ibfk_1 FOREIGN KEY (news_item_id) REFERENCES news_items (id) ON DELETE SET NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
+            except Exception as exc:
+                err = str(exc).lower()
+                if "duplicate" not in err and "already exists" not in err:
+                    raise
         conn.commit()
 

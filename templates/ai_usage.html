@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Consumo de IA — Monitor Goiás{% endblock %}
+
+{% block content %}
+<div class="page animate-slide-in">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Consumo de IA</h1>
+      <p class="page-subtitle">Registros detalhados de chamadas de IA por notícia</p>
+    </div>
+  </div>
+
+  <form id="usage-filters" method="GET" action="{{ url_for('ai_usage') }}" class="filters-row">
+    <select name="entity" class="input select-input">
+      <option value="all" {% if filters.entity == 'all' %}selected{% endif %}>Todas Entidades</option>
+      {% for e in entities %}
+        <option value="{{ e.id }}" {% if filters.entity == e.id %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+    <input type="date" name="start_date" value="{{ filters.start_date }}" class="input date-input" />
+    <input type="date" name="end_date" value="{{ filters.end_date }}" class="input date-input" />
+    <select name="provider" class="input select-input">
+      <option value="all" {% if filters.provider == 'all' %}selected{% endif %}>Todos provedores</option>
+      <option value="api_ai_go" {% if filters.provider == 'api_ai_go' %}selected{% endif %}>API AI GO</option>
+      <option value="google" {% if filters.provider == 'google' %}selected{% endif %}>Google</option>
+      <option value="huggingface" {% if filters.provider == 'huggingface' %}selected{% endif %}>HuggingFace</option>
+      <option value="cohere" {% if filters.provider == 'cohere' %}selected{% endif %}>Cohere</option>
+      <option value="cerebras" {% if filters.provider == 'cerebras' %}selected{% endif %}>Cerebras</option>
+      <option value="groq" {% if filters.provider == 'groq' %}selected{% endif %}>Groq</option>
+      <option value="mistral" {% if filters.provider == 'mistral' %}selected{% endif %}>Mistral</option>
+    </select>
+    <input type="text" name="model" value="{{ filters.model }}" placeholder="Modelo (ex: gpt-4o-mini)" class="input" />
+    <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
+    {% if filters.entity != 'all' or filters.start_date or filters.end_date or filters.provider != 'all' or filters.model %}
+      <a href="{{ url_for('ai_usage') }}" class="btn btn-ghost btn-sm">Limpar</a>
+    {% endif %}
+  </form>
+
+  <div class="card mt-4">
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Notícia</th>
+            <th>Entidade</th>
+            <th>Provedor</th>
+            <th>Modelo</th>
+            <th>Input</th>
+            <th>Output</th>
+            <th>Duração (s)</th>
+            <th>Quando</th>
+            <th>Serviço</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if not rows %}
+            <tr><td colspan="9" class="text-muted">Nenhum registro encontrado.</td></tr>
+          {% else %}
+            {% for r in rows %}
+              <tr>
+                <td>
+                  {% if r.news_source_url %}
+                    <a href="{{ r.news_source_url }}" target="_blank" rel="noopener noreferrer">{{ r.news_title or '—' }}</a>
+                  {% else %}
+                    {{ r.news_title or '—' }}
+                  {% endif %}
+                </td>
+                <td>{{ r.entity_name or '—' }}</td>
+                <td>{{ r.provider or '—' }}</td>
+                <td>{{ r.model or '—' }}</td>
+                <td>{{ r.input_tokens or '—' }}</td>
+                <td>{{ r.output_tokens or '—' }}</td>
+                <td>{{ '%.2f'|format(r.duration_sec or 0.0) }}</td>
+                <td>{{ r.timestamp | datetime_br }}</td>
+                <td>{{ r.service_name or '—' }}</td>
+              </tr>
+            {% endfor %}
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -455,13 +455,24 @@ def _request_google(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
     )
     if response is None:
         return None
+    started = time.perf_counter()
     data = response.json()
+    duration = max(0.0, time.perf_counter() - started)
     candidates = data.get("candidates") or []
     if not candidates:
         return None
     parts = (((candidates[0] or {}).get("content") or {}).get("parts") or [])
     text = "\n".join(part.get("text", "") for part in parts if isinstance(part, dict))
-    return _extract_json_text(text)
+    result = _extract_json_text(text)
+    meta = {
+        "provider": "google",
+        "model": GOOGLE_MODEL,
+        "input_tokens": None,
+        "output_tokens": None,
+        "duration_sec": duration,
+        "service_name": "google",
+    }
+    return (result, meta) if isinstance(result, dict) else None
 
 
 def _request_openai_compatible(
@@ -492,13 +503,27 @@ def _request_openai_compatible(
     )
     if response is None:
         return None
+    started = time.perf_counter()
     data = response.json()
+    duration = max(0.0, time.perf_counter() - started)
     text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-    return _extract_json_text(text)
+    result = _extract_json_text(text)
+    usage = data.get("usage") or {}
+    input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+    output_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+    meta = {
+        "provider": provider,
+        "model": model,
+        "input_tokens": int(input_tokens) if input_tokens is not None else None,
+        "output_tokens": int(output_tokens) if output_tokens is not None else None,
+        "duration_sec": duration,
+        "service_name": provider,
+    }
+    return (result, meta) if isinstance(result, dict) else None
 
 
 def _request_huggingface(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
-    return _request_openai_compatible(
+    out = _request_openai_compatible(
         "huggingface",
         "https://router.huggingface.co/v1/chat/completions",
         HUGGINGFACE_API_KEY,
@@ -506,6 +531,7 @@ def _request_huggingface(system_prompt: str, user_prompt: str) -> dict[str, Any]
         system_prompt,
         user_prompt,
     )
+    return out
 
 
 def _request_cohere(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
@@ -529,7 +555,9 @@ def _request_cohere(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
     )
     if response is None:
         return None
+    started = time.perf_counter()
     data = response.json()
+    duration = max(0.0, time.perf_counter() - started)
 
     message = data.get("message") or {}
     content = message.get("content")
@@ -546,11 +574,23 @@ def _request_cohere(system_prompt: str, user_prompt: str) -> dict[str, Any] | No
     if not text:
         text = data.get("text") or data.get("output_text") or ""
 
-    return _extract_json_text(text)
+    result = _extract_json_text(text)
+    usage = data.get("usage") or {}
+    input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+    output_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+    meta = {
+        "provider": "cohere",
+        "model": COHERE_MODEL,
+        "input_tokens": int(input_tokens) if input_tokens is not None else None,
+        "output_tokens": int(output_tokens) if output_tokens is not None else None,
+        "duration_sec": duration,
+        "service_name": "cohere",
+    }
+    return (result, meta) if isinstance(result, dict) else None
 
 
 def _request_cerebras(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
-    return _request_openai_compatible(
+    out = _request_openai_compatible(
         "cerebras",
         "https://api.cerebras.ai/v1/chat/completions",
         CEREBRAS_API_KEY,
@@ -558,6 +598,7 @@ def _request_cerebras(system_prompt: str, user_prompt: str) -> dict[str, Any] | 
         system_prompt,
         user_prompt,
     )
+    return out
 
 
 def _get_api_ai_go_token() -> str | None:
@@ -603,6 +644,7 @@ def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] |
     token = _get_api_ai_go_token()
     if not token:
         return None
+    t0 = time.perf_counter()
     response = _post_json_with_cooldown(
         "api_ai_go",
         API_AI_GO_ENDPOINT,
@@ -622,12 +664,25 @@ def _request_api_ai_go(system_prompt: str, user_prompt: str) -> dict[str, Any] |
     if response is None:
         return None
     data = response.json()
+    duration = max(0.0, time.perf_counter() - t0)
     text = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
-    return _extract_json_text(text)
+    result = _extract_json_text(text)
+    usage = data.get("usage") or {}
+    input_tokens = usage.get("prompt_tokens") or usage.get("input_tokens")
+    output_tokens = usage.get("completion_tokens") or usage.get("output_tokens")
+    meta = {
+        "provider": "api_ai_go",
+        "model": API_AI_GO_MODEL,
+        "input_tokens": int(input_tokens) if input_tokens is not None else None,
+        "output_tokens": int(output_tokens) if output_tokens is not None else None,
+        "duration_sec": duration,
+        "service_name": "api_ai_go",
+    }
+    return (result, meta) if isinstance(result, dict) else None
 
 
 def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
-    providers: list[tuple[str, Callable[[], dict[str, Any] | None]]] = [
+    providers: list[tuple[str, Callable[[], tuple[dict[str, Any] | None, dict[str, Any] | None] | None]]] = [
         ("api_ai_go", lambda: _request_api_ai_go(system_prompt, user_prompt)),
         ("google", lambda: _request_google(system_prompt, user_prompt)),
         (
@@ -659,11 +714,22 @@ def _classify_with_fallbacks(system_prompt: str, user_prompt: str) -> dict[str, 
 
     for provider_name, provider_call in providers:
         try:
-            result = provider_call()
+            out = provider_call()
         except Exception:
-            result = None
+            out = None
+        if not out:
+            continue
+        # provider_call may return (result, meta) or None
+        if isinstance(out, tuple) and len(out) == 2:
+            result, meta = out
+        elif isinstance(out, dict):
+            result, meta = out, None
+        else:
+            continue
         if isinstance(result, dict):
             result.setdefault("ai_provider", provider_name)
+            if meta:
+                result.setdefault("ai_call_meta", meta)
             return result
     return None
 

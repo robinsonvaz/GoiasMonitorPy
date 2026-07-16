@@ -419,6 +419,88 @@ async def news(
 
 
 # ---------------------------------------------------------------------------
+# AI consumption
+# ---------------------------------------------------------------------------
+
+
+@app.get("/consumo-ia", response_class=HTMLResponse, name="ai_usage")
+async def ai_usage(
+    request: Request,
+    user: UserDep,
+    entity: str = "all",
+    start_date: str = "",
+    end_date: str = "",
+    provider: str = "all",
+    model: str = "",
+) -> HTMLResponse:
+    all_entities: list[dict[str, Any]] = query_all(
+        "SELECT id, name FROM monitored_entities ORDER BY name"
+    )
+
+    rows: list[dict[str, Any]] = query_all(
+        """
+        SELECT a.*, n.title AS news_title, n.source_url AS news_source_url, e.name AS entity_name
+        FROM api_calls a
+        LEFT JOIN news_items n ON n.id = a.news_item_id
+        LEFT JOIN monitored_entities e ON e.id = n.entity_id
+        ORDER BY a.timestamp DESC
+        """
+    )
+
+    def _parse_date_param(value: str) -> date | None:
+        raw = (value or "").strip()
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    start_date_obj = _parse_date_param(start_date)
+    end_date_obj = _parse_date_param(end_date)
+
+    def _matches_period(item: dict[str, Any]) -> bool:
+        ts = item.get("timestamp")
+        if not ts:
+            return False
+        try:
+            if isinstance(ts, datetime):
+                d = ts.date()
+            else:
+                d = datetime.fromisoformat(str(ts).replace("Z", "+00:00")).date()
+        except Exception:
+            return False
+        if start_date_obj and d < start_date_obj:
+            return False
+        if end_date_obj and d > end_date_obj:
+            return False
+        return True
+
+    filtered = [
+        r for r in rows
+        if (entity == "all" or (r.get("entity_name") and r.get("entity_name") == next((e['name'] for e in all_entities if e['id'] == entity), None)))
+        and (provider == "all" or not provider or (r.get("provider") == provider))
+        and (not model or r.get("model") == model)
+        and _matches_period(r)
+    ]
+
+    return _render(
+        request,
+        "ai_usage.html",
+        rows=filtered,
+        entities=all_entities,
+        filters={
+            "entity": entity,
+            "start_date": start_date,
+            "end_date": end_date,
+            "provider": provider,
+            "model": model,
+        },
+        user=user,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entities
 # ---------------------------------------------------------------------------
 

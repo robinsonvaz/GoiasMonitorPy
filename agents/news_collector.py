@@ -348,6 +348,31 @@ def run(entity_id: str | None = None, user_id: str | None = None) -> dict[str, A
                     published_at,
                 ),
             )
+            # Record AI token consumption if available
+            try:
+                ai_meta = classified.get("ai_call_meta") if isinstance(classified, dict) else None
+                if ai_meta:
+                    execute(
+                        """
+                        INSERT INTO api_calls
+                        (news_item_id, node_name, provider, model, input_tokens, output_tokens, duration_sec, timestamp, call_type, service_name)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(6), %s, %s)
+                        """,
+                        (
+                            news_item_id,
+                            None,
+                            ai_meta.get("provider"),
+                            ai_meta.get("model"),
+                            ai_meta.get("input_tokens"),
+                            ai_meta.get("output_tokens"),
+                            ai_meta.get("duration_sec"),
+                            "AI",
+                            ai_meta.get("service_name"),
+                        ),
+                    )
+            except Exception:
+                # Do not fail the whole collection if recording usage fails.
+                pass
             perf_metrics["insert_ms"] += (time.perf_counter() - insert_started) * 1000.0
             total_collected += 1
 
