@@ -11,6 +11,7 @@
         "breakdown.get(st,": true,
         "f\\\"---": true,
         "f\\\"": true,
-        ".venv\\Scripts\\python.exe": true
+        ".venv\\Scripts\\python.exe": true,
+        "D:\\Sistemas\\GoiasMonitorPy\\.venv\\Scripts\\python.exe": true
     }
 }
